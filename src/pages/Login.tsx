@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useAuth } from '@/hooks/useAuth';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { toast } from '@/hooks/use-toast';
 
 export default function Login() {
@@ -128,6 +128,19 @@ export default function Login() {
       <p style={{ marginTop: '32px', textAlign: 'center', color: 'hsl(var(--muted-foreground))' }}>
         Biometric login available on supported devices
       </p>
+
+      <Link
+        to="/install"
+        style={{
+          display: 'block',
+          marginTop: '16px',
+          textAlign: 'center',
+          color: 'hsl(var(--muted-foreground))',
+          textDecoration: 'underline',
+        }}
+      >
+        Install App on Phone
+      </Link>
     </div>
   );
 }
