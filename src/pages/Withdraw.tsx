@@ -69,6 +69,8 @@ export default function Withdraw() {
         user_id: user.id,
         amount: numAmount,
         status: 'pending',
+        withdraw_type: withdrawType,
+        bank_name: withdrawType === 'chime' ? 'Chime' : '',
       });
 
     if (error) {
@@ -155,7 +157,8 @@ export default function Withdraw() {
           value={withdrawType}
           onChange={(e) => setWithdrawType(e.target.value)}
         >
-          <option value="bank">To Bank (cash)</option>
+          <option value="chime">Chime Account</option>
+          <option value="bank">Other Bank (cash)</option>
           <option value="convert">Convert Crypto to USD first</option>
         </select>
       </div>
