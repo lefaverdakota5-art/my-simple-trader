@@ -7,6 +7,7 @@ import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import Council from "./pages/Council";
 import Withdraw from "./pages/Withdraw";
+import Install from "./pages/Install";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -22,6 +23,7 @@ const App = () => (
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/council" element={<Council />} />
           <Route path="/withdraw" element={<Withdraw />} />
+          <Route path="/install" element={<Install />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>
