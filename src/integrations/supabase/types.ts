@@ -16,28 +16,49 @@ export type Database = {
     Tables: {
       trader_state: {
         Row: {
+          autonomy_mode: boolean | null
           balance: number
+          council_reasons: string[] | null
+          council_votes: string | null
           id: string
+          portfolio_value: number | null
+          progress_percent: number | null
           swarm_active: boolean
           todays_profit: number
           updated_at: string
           user_id: string
+          win_rate: number | null
+          withdraw_status: string | null
         }
         Insert: {
+          autonomy_mode?: boolean | null
           balance?: number
+          council_reasons?: string[] | null
+          council_votes?: string | null
           id?: string
+          portfolio_value?: number | null
+          progress_percent?: number | null
           swarm_active?: boolean
           todays_profit?: number
           updated_at?: string
           user_id: string
+          win_rate?: number | null
+          withdraw_status?: string | null
         }
         Update: {
+          autonomy_mode?: boolean | null
           balance?: number
+          council_reasons?: string[] | null
+          council_votes?: string | null
           id?: string
+          portfolio_value?: number | null
+          progress_percent?: number | null
           swarm_active?: boolean
           todays_profit?: number
           updated_at?: string
           user_id?: string
+          win_rate?: number | null
+          withdraw_status?: string | null
         }
         Relationships: []
       }
@@ -86,24 +107,30 @@ export type Database = {
       withdrawal_requests: {
         Row: {
           amount: number
+          bank_name: string | null
           created_at: string
           id: string
           status: string
           user_id: string
+          withdraw_type: string | null
         }
         Insert: {
           amount: number
+          bank_name?: string | null
           created_at?: string
           id?: string
           status?: string
           user_id: string
+          withdraw_type?: string | null
         }
         Update: {
           amount?: number
+          bank_name?: string | null
           created_at?: string
           id?: string
           status?: string
           user_id?: string
+          withdraw_type?: string | null
         }
         Relationships: []
       }
@@ -119,15 +146,31 @@ export type Database = {
         }
         Returns: boolean
       }
-      update_trader_state_from_webhook: {
-        Args: {
-          p_balance: number
-          p_profit: number
-          p_trade_message: string
-          p_user_id: string
-        }
-        Returns: undefined
-      }
+      update_trader_state_from_webhook:
+        | {
+            Args: {
+              p_balance?: number
+              p_council_reasons?: string[]
+              p_council_votes?: string
+              p_portfolio_value?: number
+              p_profit?: number
+              p_progress_percent?: number
+              p_trade_message?: string
+              p_user_id: string
+              p_win_rate?: number
+              p_withdraw_status?: string
+            }
+            Returns: undefined
+          }
+        | {
+            Args: {
+              p_balance: number
+              p_profit: number
+              p_trade_message: string
+              p_user_id: string
+            }
+            Returns: undefined
+          }
     }
     Enums: {
       app_role: "admin" | "user"
