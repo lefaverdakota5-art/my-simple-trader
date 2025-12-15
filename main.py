@@ -5,6 +5,14 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+try:
+    # Optional convenience for local runs (does nothing if not installed / no .env).
+    from dotenv import load_dotenv  # type: ignore
+
+    load_dotenv()
+except Exception:
+    pass
+
 import krakenex
 import requests
 from alpaca.trading.client import TradingClient
@@ -29,7 +37,8 @@ def _env_bool(name: str, default: bool) -> bool:
 @dataclass(frozen=True)
 class Settings:
     # Supabase
-    supabase_url: str | None = os.getenv("SUPABASE_URL")
+    # Convenience: allow reusing Vite env var names when running locally.
+    supabase_url: str | None = os.getenv("SUPABASE_URL") or os.getenv("VITE_SUPABASE_URL")
     supabase_service_role_key: str | None = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
     supabase_push_update_url: str | None = (
         os.getenv("SUPABASE_PUSH_UPDATE_URL") or os.getenv("SUPABASE_WEBHOOK")
