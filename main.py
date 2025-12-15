@@ -1,6 +1,7 @@
 import asyncio
 import os
 import sqlite3
+import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -15,6 +16,8 @@ except Exception:
 
 import krakenex
 import requests
+from alpaca.data.historical import StockHistoricalDataClient
+from alpaca.data.requests import StockLatestBarRequest, StockLatestQuoteRequest
 from alpaca.trading.client import TradingClient
 from alpaca.trading.enums import OrderSide, TimeInForce
 from alpaca.trading.requests import MarketOrderRequest
@@ -355,6 +358,71 @@ def _kraken_find_usd_pair(asset: str, asset_pairs: dict[str, Any]) -> tuple[str,
     candidates.sort(key=lambda x: x[0])
     _, pair_name, meta = candidates[0]
     return pair_name, meta
+
+
+def _kraken_public_ticker(pair: str) -> tuple[float | None, float | None]:
+    """
+    Returns (last, open) using Kraken public REST (no auth).
+    """
+    try:
+        r = requests.get(
+            "https://api.kraken.com/0/public/Ticker",
+            params={"pair": pair},
+            timeout=10,
+        )
+        data = r.json()
+        if data.get("error"):
+            return None, None
+        result = data.get("result") or {}
+        first = next(iter(result.values()), None)
+        if not first:
+            return None, None
+        last = float(first["c"][0])
+        open_ = float(first["o"])
+        return last, open_
+    except Exception:
+        return None, None
+
+
+def _alpaca_latest_snapshot(symbols: list[str]) -> dict[str, dict[str, float]]:
+    """
+    Best-effort latest prices from Alpaca data API (requires Alpaca keys).
+    Returns per-symbol dict; empty if unavailable.
+    """
+    alpaca_key, alpaca_secret = _get_alpaca_creds()
+    if not (alpaca_key and alpaca_secret) or not symbols:
+        return {}
+
+    symbols = [s.strip().upper() for s in symbols if s.strip()]
+    if not symbols:
+        return {}
+
+    out: dict[str, dict[str, float]] = {}
+    try:
+        client = StockHistoricalDataClient(alpaca_key, alpaca_secret)
+        quotes = client.get_stock_latest_quote(StockLatestQuoteRequest(symbol_or_symbols=symbols))
+        for sym, q in quotes.items():
+            try:
+                out[str(sym)] = {"bid": float(q.bid_price), "ask": float(q.ask_price)}
+            except Exception:
+                continue
+        if out:
+            return out
+    except Exception:
+        pass
+
+    # Fallback to bars
+    try:
+        client = StockHistoricalDataClient(alpaca_key, alpaca_secret)
+        bars = client.get_stock_latest_bar(StockLatestBarRequest(symbol_or_symbols=symbols))
+        for sym, b in bars.items():
+            try:
+                out[str(sym)] = {"open": float(b.open), "close": float(b.close)}
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return out
 
 
 class PushUpdateClient:
@@ -932,6 +1000,88 @@ async def sell_to_cash(authorization: str | None = Header(default=None)) -> JSON
             "alpaca": alpaca_results,
             "kraken": kraken_results,
             "note": "Kraken sells are guarded by KRAKEN_ENABLE_TRADING=true.",
+        }
+    )
+
+
+@app.post("/simulate/run")
+async def simulate_run(
+    body: dict[str, Any],
+    authorization: str | None = Header(default=None),
+) -> JSONResponse:
+    """
+    Short, bounded simulation (NO orders) using real market data when available:
+    - Kraken public ticker for price change
+    - Alpaca latest quote/bar snapshot (if keys available)
+    """
+    if not authorization or not authorization.lower().startswith("bearer "):
+        return JSONResponse({"error": "Missing Authorization Bearer token"}, status_code=401)
+    user_id = _supabase_user_id_from_jwt(authorization.split(" ", 1)[1])
+    if not user_id:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    seconds = int(body.get("seconds") or 20)
+    seconds = max(5, min(seconds, 60))
+    tick_seconds = float(body.get("tick_seconds") or 5)
+    tick_seconds = max(2.0, min(tick_seconds, 10.0))
+
+    pairs_in = body.get("pairs")
+    if isinstance(pairs_in, list) and all(isinstance(p, str) for p in pairs_in):
+        pairs = [p.strip().upper() for p in pairs_in if p.strip()][:10]
+    else:
+        pairs = SETTINGS.kraken_pairs[:10]
+
+    symbols_in = body.get("symbols")
+    if isinstance(symbols_in, list) and all(isinstance(s, str) for s in symbols_in):
+        symbols = [s.strip().upper() for s in symbols_in if s.strip()][:10]
+    else:
+        symbols = SETTINGS.alpaca_symbols[:10]
+
+    started = time.time()
+    events: list[dict[str, Any]] = []
+
+    while time.time() - started < seconds:
+        pct_change = 0.0
+        last_price: float | None = None
+        open_price: float | None = None
+
+        for pair in pairs:
+            last, open_ = _kraken_public_ticker(pair)
+            if last is not None and open_ not in (None, 0.0):
+                last_price = last
+                open_price = open_
+                pct_change = (last / open_ - 1.0) * 100.0
+                break
+
+        votes, reasons, approved = _council_vote_from_price_change(pct_change, orders_left=True)
+        alpaca_snapshot = _alpaca_latest_snapshot(symbols)
+
+        events.append(
+            {
+                "ts": datetime.now(tz=UTC).isoformat(),
+                "kraken": {
+                    "pairs": pairs,
+                    "last": last_price,
+                    "open": open_price,
+                    "pct_change": pct_change,
+                },
+                "council_votes": votes,
+                "council_reasons": reasons,
+                "would_trade": bool(approved),
+                "alpaca_latest": alpaca_snapshot,
+                "note": "Simulation only. No orders submitted.",
+            }
+        )
+
+        await asyncio.sleep(tick_seconds)
+
+    return JSONResponse(
+        {
+            "success": True,
+            "user_id": user_id,
+            "seconds": seconds,
+            "tick_seconds": tick_seconds,
+            "events": events,
         }
     )
 
