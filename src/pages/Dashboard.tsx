@@ -2,14 +2,14 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { useTraderState } from '@/hooks/useTraderState';
-import { getBotApiBaseUrl, getSupabaseAccessToken } from "@/lib/botApi";
+import { supabase } from "@/integrations/supabase/client";
 
 export default function Dashboard() {
   const { user, loading: authLoading, signOut, initializeTraderState } = useAuth();
   const { state, trades, loading: stateLoading, toggleSwarm, toggleAutonomy } = useTraderState(user?.id || null);
   const navigate = useNavigate();
-  const [backendStatus, setBackendStatus] = useState<
-    null | { ok: boolean; botActive?: boolean; plaidLinked?: boolean; alpaca?: boolean; kraken?: boolean }
+  const [keyStatus, setKeyStatus] = useState<
+    null | { ok: boolean; alpacaOk?: boolean; krakenOk?: boolean; plaidOk?: boolean; openaiOk?: boolean }
   >(null);
 
   useEffect(() => {
@@ -26,31 +26,24 @@ export default function Dashboard() {
 
   useEffect(() => {
     (async () => {
-      const base = getBotApiBaseUrl();
-      if (!base) {
-        setBackendStatus(null);
-        return;
-      }
-      const token = await getSupabaseAccessToken();
-      if (!token) {
-        setBackendStatus({ ok: false });
-        return;
-      }
+      if (!user) return;
       try {
-        const r1 = await fetch(`${base}/me/status`, { headers: { Authorization: `Bearer ${token}` } });
-        const d1 = await r1.json();
-        const r2 = await fetch(`${base}/me/config`, { headers: { Authorization: `Bearer ${token}` } });
-        const d2 = await r2.json();
-        const ok = r1.ok && r2.ok;
-        setBackendStatus({
-          ok,
-          botActive: Boolean(d1?.bot_active),
-          plaidLinked: Boolean(d2?.plaid_linked),
-          alpaca: Boolean(d2?.alpaca_configured),
-          kraken: Boolean(d2?.kraken_configured),
+        const { data, error } = await supabase.functions.invoke("bot-actions", {
+          body: { action: "status" },
+        });
+        if (error) {
+          setKeyStatus({ ok: false });
+          return;
+        }
+        setKeyStatus({
+          ok: true,
+          alpacaOk: Boolean(data?.alpacaOk),
+          krakenOk: Boolean(data?.krakenOk),
+          plaidOk: Boolean(data?.plaidOk),
+          openaiOk: Boolean(data?.openaiOk),
         });
       } catch {
-        setBackendStatus({ ok: false });
+        setKeyStatus({ ok: false });
       }
     })();
   }, [user]);
@@ -99,20 +92,13 @@ export default function Dashboard() {
       </p>
 
       <p className="medium-text" style={{ marginBottom: '16px' }}>
-        Backend:{" "}
-        {backendStatus === null
-          ? "Not set"
-          : backendStatus.ok
-            ? backendStatus.botActive
-              ? "Connected • Bot Active"
-              : "Connected • Bot Idle"
-            : "Not reachable"}
+        Bot backend: Supabase scheduled bot tick (24/7 once enabled)
       </p>
 
-      {backendStatus?.ok && (
+      {keyStatus && (
         <p className="medium-text" style={{ marginBottom: '16px' }}>
-          Connections: Plaid {backendStatus.plaidLinked ? "OK" : "Missing"} • Alpaca{" "}
-          {backendStatus.alpaca ? "OK" : "Missing"} • Kraken {backendStatus.kraken ? "OK" : "Missing"}
+          Keys: Alpaca {keyStatus.alpacaOk ? "OK" : "Missing"} • Kraken {keyStatus.krakenOk ? "OK" : "Missing"} •
+          Plaid {keyStatus.plaidOk ? "OK" : "Missing"} • OpenAI {keyStatus.openaiOk ? "OK" : "Off"}
         </p>
       )}
 

@@ -151,7 +151,7 @@ export default function Settings() {
 
         <button
           className="plain-button"
-          disabled={submitting || !botUrl}
+          disabled={submitting}
           onClick={async () => {
             const { data } = await supabase.auth.getSession();
             const token = data.session?.access_token;
