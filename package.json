@@ -9,7 +9,7 @@
     "build:dev": "vite build --mode development",
     "lint": "eslint .",
     "preview": "vite preview",
-    "apk:prepare": "npm run build && npx cap copy android"
+    "apk:prepare": "npm run build && npx cap sync android"
   },
   "dependencies": {
     "@capacitor/android": "^8.0.0",
