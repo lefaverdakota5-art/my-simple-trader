@@ -41,11 +41,15 @@ jobs:
 
       - name: Build Debug APK
         working-directory: android
-        run: ./gradlew assembleDebug
+        run: BUILD_NUMBER=${{ github.run_number }} VERSION_NAME=${{ github.sha }} ./gradlew assembleDebug
+
+      - name: Rename APK for unique downloads
+        run: |
+          cp android/app/build/outputs/apk/debug/app-debug.apk "app-debug-${{ github.run_number }}.apk"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: app-debug-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          name: app-debug-apk-${{ github.run_number }}
+          path: app-debug-${{ github.run_number }}.apk
 
