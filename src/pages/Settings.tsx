@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
+import { Clipboard } from "@capacitor/clipboard";
 import {
   getBotApiBaseUrl,
   getKrakenWithdrawAsset,
@@ -40,6 +41,20 @@ export default function Settings() {
     setKrakenWithdrawKey(getKrakenWithdrawKeyUsd());
     setKrakenWithdrawAssetState(getKrakenWithdrawAsset());
   }, []);
+
+  const pasteFromClipboard = async (setter: (v: string) => void) => {
+    try {
+      const { value } = await Clipboard.read();
+      if (!value) {
+        toast({ title: "Clipboard empty", description: "Copy the key first, then tap Paste.", variant: "destructive" });
+        return;
+      }
+      setter(value);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Clipboard unavailable";
+      toast({ title: "Paste failed", description: msg, variant: "destructive" });
+    }
+  };
 
   return (
     <div className="app-container">
@@ -85,35 +100,118 @@ export default function Settings() {
           Trading API Keys (sent to your backend)
         </h2>
         <p style={{ color: "hsl(var(--muted-foreground))", fontSize: "0.9rem", marginBottom: "12px" }}>
-          Paste keys here and press “Send to Backend”. Keys are stored on your backend (SQLite), not on the phone.
-          Your backend must be reachable and configured in “Bot Backend URL”.
+          Copy a key, tap “Paste”, then press “Send to Backend”. Keys are stored in Supabase for the bot.
         </p>
 
         <div style={{ marginBottom: "12px" }}>
           <label style={{ display: "block", marginBottom: "4px", fontWeight: 500 }}>Alpaca API Key</label>
-          <input className="plain-input" value={alpacaKey} onChange={(e) => setAlpacaKey(e.target.value)} />
+          <div style={{ display: "flex", gap: "8px" }}>
+            <input
+              className="plain-input"
+              style={{ flex: 1 }}
+              type="text"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              value={alpacaKey}
+              onChange={(e) => setAlpacaKey(e.target.value)}
+            />
+            <button className="plain-button" type="button" onClick={() => pasteFromClipboard(setAlpacaKey)}>
+              Paste
+            </button>
+          </div>
         </div>
         <div style={{ marginBottom: "12px" }}>
           <label style={{ display: "block", marginBottom: "4px", fontWeight: 500 }}>Alpaca Secret</label>
-          <input className="plain-input" value={alpacaSecret} onChange={(e) => setAlpacaSecret(e.target.value)} />
+          <div style={{ display: "flex", gap: "8px" }}>
+            <input
+              className="plain-input"
+              style={{ flex: 1 }}
+              type="password"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              value={alpacaSecret}
+              onChange={(e) => setAlpacaSecret(e.target.value)}
+            />
+            <button className="plain-button" type="button" onClick={() => pasteFromClipboard(setAlpacaSecret)}>
+              Paste
+            </button>
+          </div>
         </div>
 
         <div style={{ marginBottom: "12px" }}>
           <label style={{ display: "block", marginBottom: "4px", fontWeight: 500 }}>Kraken API Key</label>
-          <input className="plain-input" value={krakenKey} onChange={(e) => setKrakenKey(e.target.value)} />
+          <div style={{ display: "flex", gap: "8px" }}>
+            <input
+              className="plain-input"
+              style={{ flex: 1 }}
+              type="text"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              value={krakenKey}
+              onChange={(e) => setKrakenKey(e.target.value)}
+            />
+            <button className="plain-button" type="button" onClick={() => pasteFromClipboard(setKrakenKey)}>
+              Paste
+            </button>
+          </div>
         </div>
         <div style={{ marginBottom: "12px" }}>
           <label style={{ display: "block", marginBottom: "4px", fontWeight: 500 }}>Kraken Secret</label>
-          <input className="plain-input" value={krakenSecret} onChange={(e) => setKrakenSecret(e.target.value)} />
+          <div style={{ display: "flex", gap: "8px" }}>
+            <input
+              className="plain-input"
+              style={{ flex: 1 }}
+              type="password"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              value={krakenSecret}
+              onChange={(e) => setKrakenSecret(e.target.value)}
+            />
+            <button className="plain-button" type="button" onClick={() => pasteFromClipboard(setKrakenSecret)}>
+              Paste
+            </button>
+          </div>
         </div>
 
         <div style={{ marginBottom: "12px" }}>
           <label style={{ display: "block", marginBottom: "4px", fontWeight: 500 }}>Plaid Client ID</label>
-          <input className="plain-input" value={plaidClientId} onChange={(e) => setPlaidClientId(e.target.value)} />
+          <div style={{ display: "flex", gap: "8px" }}>
+            <input
+              className="plain-input"
+              style={{ flex: 1 }}
+              type="text"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              value={plaidClientId}
+              onChange={(e) => setPlaidClientId(e.target.value)}
+            />
+            <button className="plain-button" type="button" onClick={() => pasteFromClipboard(setPlaidClientId)}>
+              Paste
+            </button>
+          </div>
         </div>
         <div style={{ marginBottom: "12px" }}>
           <label style={{ display: "block", marginBottom: "4px", fontWeight: 500 }}>Plaid Secret</label>
-          <input className="plain-input" value={plaidSecret} onChange={(e) => setPlaidSecret(e.target.value)} />
+          <div style={{ display: "flex", gap: "8px" }}>
+            <input
+              className="plain-input"
+              style={{ flex: 1 }}
+              type="password"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              value={plaidSecret}
+              onChange={(e) => setPlaidSecret(e.target.value)}
+            />
+            <button className="plain-button" type="button" onClick={() => pasteFromClipboard(setPlaidSecret)}>
+              Paste
+            </button>
+          </div>
         </div>
         <div style={{ marginBottom: "12px" }}>
           <label style={{ display: "block", marginBottom: "4px", fontWeight: 500 }}>Plaid Env</label>
@@ -140,7 +238,21 @@ export default function Settings() {
           <>
             <div style={{ marginBottom: "12px" }}>
               <label style={{ display: "block", marginBottom: "4px", fontWeight: 500 }}>OpenAI API Key</label>
-              <input className="plain-input" value={openaiApiKey} onChange={(e) => setOpenaiApiKey(e.target.value)} />
+              <div style={{ display: "flex", gap: "8px" }}>
+                <input
+                  className="plain-input"
+                  style={{ flex: 1 }}
+                  type="password"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  value={openaiApiKey}
+                  onChange={(e) => setOpenaiApiKey(e.target.value)}
+                />
+                <button className="plain-button" type="button" onClick={() => pasteFromClipboard(setOpenaiApiKey)}>
+                  Paste
+                </button>
+              </div>
             </div>
             <div style={{ marginBottom: "12px" }}>
               <label style={{ display: "block", marginBottom: "4px", fontWeight: 500 }}>OpenAI Model</label>
