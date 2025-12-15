@@ -483,6 +483,13 @@ class SupabaseAdmin:
         self._url = url.rstrip("/")
         self._service_key = service_key
 
+    def _headers(self) -> dict[str, str]:
+        return {
+            "apikey": self._service_key,
+            "Authorization": f"Bearer {self._service_key}",
+            "Accept": "application/json",
+        }
+
     def list_active_swarm_user_ids(self) -> set[str]:
         # Uses service role key to bypass RLS.
         endpoint = f"{self._url}/rest/v1/trader_state"
@@ -490,15 +497,19 @@ class SupabaseAdmin:
             "select": "user_id,swarm_active",
             "swarm_active": "eq.true",
         }
-        headers = {
-            "apikey": self._service_key,
-            "Authorization": f"Bearer {self._service_key}",
-            "Accept": "application/json",
-        }
-        r = requests.get(endpoint, headers=headers, params=params, timeout=10)
+        r = requests.get(endpoint, headers=self._headers(), params=params, timeout=10)
         r.raise_for_status()
         rows = r.json() or []
         return {str(row["user_id"]) for row in rows if row.get("user_id")}
+
+    def get_user_exchange_keys(self, user_id: str) -> dict[str, Any] | None:
+        endpoint = f"{self._url}/rest/v1/user_exchange_keys"
+        params = {"select": "*", "user_id": f"eq.{user_id}", "limit": "1"}
+        r = requests.get(endpoint, headers=self._headers(), params=params, timeout=10)
+        if r.status_code != 200:
+            return None
+        rows = r.json() or []
+        return rows[0] if rows else None
 
 
 def _council_vote_from_price_change(pct_change: float, orders_left: bool) -> tuple[str, list[str], bool]:
@@ -656,9 +667,6 @@ class BotManager:
         self._push: PushUpdateClient | None = None
         self._admin: SupabaseAdmin | None = None
 
-        self._alpaca: TradingClient | None = None
-        self._kraken: KrakenAPI | None = None
-
     def configured(self) -> bool:
         return bool(self._settings.supabase_url and self._settings.supabase_push_update_url)
 
@@ -677,23 +685,6 @@ class BotManager:
         else:
             print("[bot-manager] SUPABASE_SERVICE_ROLE_KEY not set; cannot auto-start bots from swarm_active")
 
-        alpaca_key, alpaca_secret = _get_alpaca_creds()
-        if alpaca_key and alpaca_secret:
-            self._alpaca = TradingClient(
-                alpaca_key,
-                alpaca_secret,
-                paper=self._settings.alpaca_paper,
-            )
-        else:
-            print("[bot-manager] Alpaca keys not set; stock trading disabled")
-
-        kraken_key, kraken_secret = _get_kraken_creds()
-        if kraken_key and kraken_secret:
-            k = krakenex.API(key=kraken_key, secret=kraken_secret)
-            self._kraken = KrakenAPI(k)
-        else:
-            print("[bot-manager] Kraken keys not set; crypto signals degraded")
-
     def active_user_ids(self) -> list[str]:
         return sorted(self._tasks.keys())
 
@@ -701,7 +692,37 @@ class BotManager:
         if user_id in self._tasks:
             return
         assert self._push is not None
-        bot = UserBot(user_id=user_id, push=self._push, alpaca=self._alpaca, kraken=self._kraken, settings=self._settings)
+
+        alpaca: TradingClient | None = None
+        kraken: KrakenAPI | None = None
+
+        # Prefer per-user keys stored in Supabase (phone-only setup).
+        keys = self._admin.get_user_exchange_keys(user_id) if self._admin else None
+        if keys:
+            alpaca_key = keys.get("alpaca_api_key")
+            alpaca_secret = keys.get("alpaca_secret")
+            alpaca_paper = bool(keys.get("alpaca_paper", True))
+            if alpaca_key and alpaca_secret:
+                alpaca = TradingClient(str(alpaca_key), str(alpaca_secret), paper=alpaca_paper)
+
+            kraken_key = keys.get("kraken_key")
+            kraken_secret = keys.get("kraken_secret")
+            if kraken_key and kraken_secret:
+                k = krakenex.API(key=str(kraken_key), secret=str(kraken_secret))
+                kraken = KrakenAPI(k)
+
+        # Fallback: env / local SQLite
+        if alpaca is None:
+            alpaca_key, alpaca_secret = _get_alpaca_creds()
+            if alpaca_key and alpaca_secret:
+                alpaca = TradingClient(alpaca_key, alpaca_secret, paper=self._settings.alpaca_paper)
+        if kraken is None:
+            kraken_key, kraken_secret = _get_kraken_creds()
+            if kraken_key and kraken_secret:
+                k = krakenex.API(key=kraken_key, secret=kraken_secret)
+                kraken = KrakenAPI(k)
+
+        bot = UserBot(user_id=user_id, push=self._push, alpaca=alpaca, kraken=kraken, settings=self._settings)
         self._tasks[user_id] = asyncio.create_task(bot.run())
 
     def _ensure_user_stopped(self, user_id: str) -> None:
@@ -1001,18 +1022,38 @@ async def sell_to_cash(authorization: str | None = Header(default=None)) -> JSON
 
     # Alpaca (stocks)
     alpaca_results: Any = {"status": "not_configured"}
-    alpaca_key, alpaca_secret = _get_alpaca_creds()
+    alpaca_key: str | None = None
+    alpaca_secret: str | None = None
+    alpaca_paper = SETTINGS.alpaca_paper
+    if SETTINGS.supabase_url and SETTINGS.supabase_service_role_key:
+        admin = SupabaseAdmin(SETTINGS.supabase_url, SETTINGS.supabase_service_role_key)
+        keys = admin.get_user_exchange_keys(user_id)
+        if keys:
+            alpaca_key = keys.get("alpaca_api_key")
+            alpaca_secret = keys.get("alpaca_secret")
+            alpaca_paper = bool(keys.get("alpaca_paper", alpaca_paper))
+    if not alpaca_key or not alpaca_secret:
+        alpaca_key, alpaca_secret = _get_alpaca_creds()
     if alpaca_key and alpaca_secret:
         alpaca = TradingClient(
-            alpaca_key, alpaca_secret, paper=SETTINGS.alpaca_paper
+            str(alpaca_key), str(alpaca_secret), paper=alpaca_paper
         )
         alpaca_results = _alpaca_close_all_positions(alpaca)
 
     # Kraken (crypto) - safe reporting only in this build
     kraken_results: Any = {"status": "not_configured"}
-    kraken_key, kraken_secret = _get_kraken_creds()
+    kraken_key: str | None = None
+    kraken_secret: str | None = None
+    if SETTINGS.supabase_url and SETTINGS.supabase_service_role_key:
+        admin = SupabaseAdmin(SETTINGS.supabase_url, SETTINGS.supabase_service_role_key)
+        keys = admin.get_user_exchange_keys(user_id)
+        if keys:
+            kraken_key = keys.get("kraken_key")
+            kraken_secret = keys.get("kraken_secret")
+    if not kraken_key or not kraken_secret:
+        kraken_key, kraken_secret = _get_kraken_creds()
     if kraken_key and kraken_secret:
-        k = krakenex.API(key=kraken_key, secret=kraken_secret)
+        k = krakenex.API(key=str(kraken_key), secret=str(kraken_secret))
         kraken_api = KrakenAPI(k)
         kraken_results = _kraken_close_positions_to_cash(kraken_api)
 
@@ -1140,7 +1181,16 @@ async def kraken_withdraw_fiat(
             status_code=501,
         )
 
-    kraken_key, kraken_secret = _get_kraken_creds()
+    kraken_key: str | None = None
+    kraken_secret: str | None = None
+    if SETTINGS.supabase_url and SETTINGS.supabase_service_role_key:
+        admin = SupabaseAdmin(SETTINGS.supabase_url, SETTINGS.supabase_service_role_key)
+        keys = admin.get_user_exchange_keys(user_id)
+        if keys:
+            kraken_key = keys.get("kraken_key")
+            kraken_secret = keys.get("kraken_secret")
+    if not kraken_key or not kraken_secret:
+        kraken_key, kraken_secret = _get_kraken_creds()
     if not (kraken_key and kraken_secret):
         return JSONResponse({"error": "Kraken API keys not configured"}, status_code=400)
 
@@ -1157,7 +1207,7 @@ async def kraken_withdraw_fiat(
         return JSONResponse({"error": "withdrawal key is required (body.key or env KRAKEN_WITHDRAW_KEY_USD)"}, status_code=400)
 
     try:
-        k = krakenex.API(key=kraken_key, secret=kraken_secret)
+        k = krakenex.API(key=str(kraken_key), secret=str(kraken_secret))
         res = _kraken_private(
             k,
             "Withdraw",
