@@ -52,6 +52,9 @@ serve(async (req) => {
         plaid_client_id: body?.plaid_client_id ?? null,
         plaid_secret: body?.plaid_secret ?? null,
         plaid_env: body?.plaid_env ?? "production",
+        openai_api_key: body?.openai_api_key ?? null,
+        openai_model: body?.openai_model ?? "gpt-4o-mini",
+        openai_enabled: body?.openai_enabled ?? false,
         updated_at: new Date().toISOString(),
       };
 
@@ -63,7 +66,7 @@ serve(async (req) => {
     if (action === "status") {
       const { data, error } = await supabaseAdmin
         .from("user_exchange_keys")
-        .select("alpaca_api_key,alpaca_secret,kraken_key,kraken_secret,plaid_client_id,plaid_secret,plaid_env")
+        .select("alpaca_api_key,alpaca_secret,kraken_key,kraken_secret,plaid_client_id,plaid_secret,plaid_env,openai_enabled,openai_model,openai_api_key")
         .eq("user_id", userId)
         .maybeSingle();
 
@@ -71,7 +74,16 @@ serve(async (req) => {
       const alpacaOk = Boolean(data?.alpaca_api_key && data?.alpaca_secret);
       const krakenOk = Boolean(data?.kraken_key && data?.kraken_secret);
       const plaidOk = Boolean(data?.plaid_client_id && data?.plaid_secret);
-      return jsonResponse({ success: true, alpacaOk, krakenOk, plaidOk, plaidEnv: data?.plaid_env ?? null });
+      const openaiOk = Boolean(data?.openai_enabled && data?.openai_api_key);
+      return jsonResponse({
+        success: true,
+        alpacaOk,
+        krakenOk,
+        plaidOk,
+        openaiOk,
+        plaidEnv: data?.plaid_env ?? null,
+        openaiModel: data?.openai_model ?? null,
+      });
     }
 
     return jsonResponse({ error: "Unknown action" }, 400);

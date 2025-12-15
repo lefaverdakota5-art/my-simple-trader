@@ -26,6 +26,9 @@ export default function Settings() {
   const [plaidClientId, setPlaidClientId] = useState("");
   const [plaidSecret, setPlaidSecret] = useState("");
   const [plaidEnv, setPlaidEnv] = useState("production");
+  const [openaiEnabled, setOpenaiEnabled] = useState(false);
+  const [openaiApiKey, setOpenaiApiKey] = useState("");
+  const [openaiModel, setOpenaiModel] = useState("gpt-4o-mini");
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -121,6 +124,31 @@ export default function Settings() {
           </select>
         </div>
 
+        <div style={{ marginBottom: "12px" }}>
+          <label style={{ display: "block", marginBottom: "4px", fontWeight: 500 }}>OpenAI (optional)</label>
+          <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+            <input
+              type="checkbox"
+              checked={openaiEnabled}
+              onChange={(e) => setOpenaiEnabled(e.target.checked)}
+              style={{ width: "18px", height: "18px" }}
+            />
+            <span style={{ color: "hsl(var(--muted-foreground))" }}>Enable OpenAI council vote</span>
+          </div>
+        </div>
+        {openaiEnabled && (
+          <>
+            <div style={{ marginBottom: "12px" }}>
+              <label style={{ display: "block", marginBottom: "4px", fontWeight: 500 }}>OpenAI API Key</label>
+              <input className="plain-input" value={openaiApiKey} onChange={(e) => setOpenaiApiKey(e.target.value)} />
+            </div>
+            <div style={{ marginBottom: "12px" }}>
+              <label style={{ display: "block", marginBottom: "4px", fontWeight: 500 }}>OpenAI Model</label>
+              <input className="plain-input" value={openaiModel} onChange={(e) => setOpenaiModel(e.target.value)} />
+            </div>
+          </>
+        )}
+
         <button
           className="plain-button"
           disabled={submitting || !botUrl}
@@ -141,6 +169,9 @@ export default function Settings() {
                   plaid_client_id: plaidClientId,
                   plaid_secret: plaidSecret,
                   plaid_env: plaidEnv,
+                  openai_enabled: openaiEnabled,
+                  openai_api_key: openaiApiKey,
+                  openai_model: openaiModel,
                 },
               });
               if (error) {
@@ -148,13 +179,14 @@ export default function Settings() {
               } else if (resp?.error) {
                 toast({ title: "Failed", description: String(resp.error), variant: "destructive" });
               } else {
-                toast({ title: "Saved", description: "Keys stored on backend. Restart backend to apply to bots." });
+                toast({ title: "Saved", description: "Keys stored in Supabase for bot tick." });
                 setAlpacaKey("");
                 setAlpacaSecret("");
                 setKrakenKey("");
                 setKrakenSecret("");
                 setPlaidClientId("");
                 setPlaidSecret("");
+                setOpenaiApiKey("");
               }
             } finally {
               setSubmitting(false);

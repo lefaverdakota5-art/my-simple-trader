@@ -50,6 +50,88 @@ function council(pct: number, ordersLeft: boolean) {
   return { votes: `${yes}/5`, reasons, approved: yes >= 4 };
 }
 
+async function openaiVote(opts: {
+  apiKey: string;
+  model: string;
+  context: { pct: number; krakenPair: string; symbol: string; ordersLeft: boolean };
+}): Promise<{ vote: boolean; reason: string } | null> {
+  try {
+    const controller = new AbortController();
+    const t = setTimeout(() => controller.abort(), 8000);
+    const prompt = `You are a conservative trading assistant. Vote YES/NO for placing a small market BUY.
+Return ONLY JSON: {"vote":"YES"|"NO","reason":"..."}.
+
+Context:
+- Pair: ${opts.context.krakenPair}
+- Pair pct change today: ${opts.context.pct.toFixed(2)}%
+- Stock symbol: ${opts.context.symbol}
+- Orders left today: ${opts.context.ordersLeft}
+
+Rules:
+- Prefer NO if volatility is high or ordersLeft is false.
+- Be conservative.`;
+
+    const r = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${opts.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: opts.model || "gpt-4o-mini",
+        input: prompt,
+      }),
+    });
+    clearTimeout(t);
+    if (!r.ok) return null;
+
+    const text = await r.text();
+    const data = (() => {
+      try {
+        return text ? (JSON.parse(text) as Record<string, unknown>) : {};
+      } catch {
+        return {};
+      }
+    })();
+
+    const outputText =
+      (typeof data["output_text"] === "string" && (data["output_text"] as string)) ||
+      (Array.isArray(data["output"])
+        ? (() => {
+            for (const item of data["output"] as unknown[]) {
+              if (!item || typeof item !== "object") continue;
+              const content = (item as Record<string, unknown>)["content"];
+              if (!Array.isArray(content)) continue;
+              for (const c of content) {
+                if (!c || typeof c !== "object") continue;
+                if ((c as Record<string, unknown>)["type"] === "output_text") {
+                  const t = (c as Record<string, unknown>)["text"];
+                  if (typeof t === "string") return t;
+                }
+              }
+            }
+            return "";
+          })()
+        : "");
+
+    if (!outputText) return null;
+    const parsed = (() => {
+      try {
+        return JSON.parse(outputText) as { vote?: string; reason?: string };
+      } catch {
+        return null;
+      }
+    })();
+    if (!parsed?.vote) return null;
+    const vote = String(parsed.vote).toUpperCase() === "YES";
+    const reason = typeof parsed.reason === "string" ? parsed.reason : "OpenAI vote";
+    return { vote, reason };
+  } catch {
+    return null;
+  }
+}
+
 async function alpacaPlaceOrder(opts: {
   alpacaKey: string;
   alpacaSecret: string;
@@ -133,7 +215,7 @@ serve(async (req) => {
       // pull keys
       const { data: keys, error: keysErr } = await supabaseAdmin
         .from("user_exchange_keys")
-        .select("alpaca_api_key,alpaca_secret,alpaca_paper")
+        .select("alpaca_api_key,alpaca_secret,alpaca_paper,openai_enabled,openai_api_key,openai_model")
         .eq("user_id", userId)
         .maybeSingle();
       if (keysErr) {
@@ -163,7 +245,27 @@ serve(async (req) => {
       const ordersCount = Number(stat?.orders_count || 0);
       const ordersLeft = ordersCount < maxOrdersPerDay;
 
-      const c = council(pct, ordersLeft);
+      let c = council(pct, ordersLeft);
+
+      // Optional OpenAI extra vote adds a 6th council member
+      if (keys?.openai_enabled && keys?.openai_api_key) {
+        const extra = await openaiVote({
+          apiKey: String(keys.openai_api_key),
+          model: String(keys.openai_model || "gpt-4o-mini"),
+          context: { pct, krakenPair, symbol: defaultSymbol, ordersLeft },
+        });
+        if (extra) {
+          const yesBase = Number(String(c.votes).split("/")[0] || "0");
+          const total = 6;
+          const yes = yesBase + (extra.vote ? 1 : 0);
+          const threshold = Math.ceil(total * 0.8); // 80% yes required
+          c = {
+            votes: `${yes}/${total}`,
+            reasons: [...c.reasons, `${extra.vote ? "YES" : "NO"}: OpenAI • ${extra.reason}`],
+            approved: yes >= threshold,
+          };
+        }
+      }
 
       // always publish council
       await supabaseAdmin.rpc("update_trader_state_from_webhook", {
