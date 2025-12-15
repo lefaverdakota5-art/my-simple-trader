@@ -193,6 +193,13 @@ def _get_kraken_creds() -> tuple[str | None, str | None]:
     )
 
 
+def _get_plaid_creds() -> tuple[str | None, str | None, str]:
+    client_id = SETTINGS.plaid_client_id or _db_get_secret("PLAID_CLIENT_ID")
+    secret = SETTINGS.plaid_secret or _db_get_secret("PLAID_SECRET")
+    env = SETTINGS.plaid_env or (_db_get_secret("PLAID_ENV") or "sandbox")
+    return client_id, secret, env.strip().lower() if isinstance(env, str) else "sandbox"
+
+
 def _supabase_user_id_from_jwt(jwt: str) -> str | None:
     if not SETTINGS.supabase_url or not SETTINGS.supabase_service_role_key:
         return None
@@ -254,19 +261,21 @@ def _supabase_get_rows(table: str, select: str, filters: dict[str, str]) -> list
 
 
 def _plaid_base_url() -> str:
-    if SETTINGS.plaid_env == "production":
+    _, _, env = _get_plaid_creds()
+    if env == "production":
         return "https://production.plaid.com"
-    if SETTINGS.plaid_env == "development":
+    if env == "development":
         return "https://development.plaid.com"
     return "https://sandbox.plaid.com"
 
 
 def _plaid_post(path: str, payload: dict[str, Any]) -> dict[str, Any]:
-    if not SETTINGS.plaid_client_id or not SETTINGS.plaid_secret:
+    client_id, secret, _ = _get_plaid_creds()
+    if not client_id or not secret:
         raise RuntimeError("Plaid not configured (PLAID_CLIENT_ID/PLAID_SECRET missing)")
     body = {
-        "client_id": SETTINGS.plaid_client_id,
-        "secret": SETTINGS.plaid_secret,
+        "client_id": client_id,
+        "secret": secret,
         **payload,
     }
     r = requests.post(
@@ -754,7 +763,8 @@ async def config_status() -> JSONResponse:
     if not (kraken_key and kraken_secret):
         missing.append("KRAKEN_KEY + KRAKEN_SECRET")
 
-    plaid_ok = bool(SETTINGS.plaid_client_id and SETTINGS.plaid_secret)
+    plaid_client_id, plaid_secret, _ = _get_plaid_creds()
+    plaid_ok = bool(plaid_client_id and plaid_secret)
     return JSONResponse(
         {
             "supabase_configured": bool(SETTINGS.supabase_url and SETTINGS.supabase_service_role_key),
@@ -795,6 +805,9 @@ async def config_set_keys(
     alpaca_secret = _get_str("alpaca_secret")
     kraken_key = _get_str("kraken_key")
     kraken_secret = _get_str("kraken_secret")
+    plaid_client_id = _get_str("plaid_client_id")
+    plaid_secret = _get_str("plaid_secret")
+    plaid_env = _get_str("plaid_env")
 
     wrote = []
     if alpaca_api_key:
@@ -809,6 +822,15 @@ async def config_set_keys(
     if kraken_secret:
         _db_set_secret("KRAKEN_SECRET", kraken_secret)
         wrote.append("KRAKEN_SECRET")
+    if plaid_client_id:
+        _db_set_secret("PLAID_CLIENT_ID", plaid_client_id)
+        wrote.append("PLAID_CLIENT_ID")
+    if plaid_secret:
+        _db_set_secret("PLAID_SECRET", plaid_secret)
+        wrote.append("PLAID_SECRET")
+    if plaid_env:
+        _db_set_secret("PLAID_ENV", plaid_env)
+        wrote.append("PLAID_ENV")
 
     return JSONResponse(
         {
@@ -848,10 +870,11 @@ async def me_config(authorization: str | None = Header(default=None)) -> JSONRes
 
     alpaca_key, alpaca_secret = _get_alpaca_creds()
     kraken_key, kraken_secret = _get_kraken_creds()
+    plaid_client_id, plaid_secret, _ = _get_plaid_creds()
     return JSONResponse(
         {
             "supabase_configured": bool(SETTINGS.supabase_url and SETTINGS.supabase_service_role_key),
-            "plaid_configured": bool(SETTINGS.plaid_client_id and SETTINGS.plaid_secret),
+            "plaid_configured": bool(plaid_client_id and plaid_secret),
             "plaid_linked": bool(_db_get_plaid_access_token(user_id)),
             "alpaca_configured": bool(alpaca_key and alpaca_secret),
             "kraken_configured": bool(kraken_key and kraken_secret),

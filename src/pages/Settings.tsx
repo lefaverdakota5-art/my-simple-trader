@@ -23,6 +23,9 @@ export default function Settings() {
   const [alpacaSecret, setAlpacaSecret] = useState("");
   const [krakenKey, setKrakenKey] = useState("");
   const [krakenSecret, setKrakenSecret] = useState("");
+  const [plaidClientId, setPlaidClientId] = useState("");
+  const [plaidSecret, setPlaidSecret] = useState("");
+  const [plaidEnv, setPlaidEnv] = useState("production");
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -101,6 +104,23 @@ export default function Settings() {
           <input className="plain-input" value={krakenSecret} onChange={(e) => setKrakenSecret(e.target.value)} />
         </div>
 
+        <div style={{ marginBottom: "12px" }}>
+          <label style={{ display: "block", marginBottom: "4px", fontWeight: 500 }}>Plaid Client ID</label>
+          <input className="plain-input" value={plaidClientId} onChange={(e) => setPlaidClientId(e.target.value)} />
+        </div>
+        <div style={{ marginBottom: "12px" }}>
+          <label style={{ display: "block", marginBottom: "4px", fontWeight: 500 }}>Plaid Secret</label>
+          <input className="plain-input" value={plaidSecret} onChange={(e) => setPlaidSecret(e.target.value)} />
+        </div>
+        <div style={{ marginBottom: "12px" }}>
+          <label style={{ display: "block", marginBottom: "4px", fontWeight: 500 }}>Plaid Env</label>
+          <select className="plain-input" value={plaidEnv} onChange={(e) => setPlaidEnv(e.target.value)}>
+            <option value="production">production</option>
+            <option value="development">development</option>
+            <option value="sandbox">sandbox</option>
+          </select>
+        </div>
+
         <button
           className="plain-button"
           disabled={submitting || !botUrl}
@@ -122,6 +142,9 @@ export default function Settings() {
                   alpaca_secret: alpacaSecret,
                   kraken_key: krakenKey,
                   kraken_secret: krakenSecret,
+                  plaid_client_id: plaidClientId,
+                  plaid_secret: plaidSecret,
+                  plaid_env: plaidEnv,
                 }),
               });
               const resp = await r.json();
@@ -133,6 +156,8 @@ export default function Settings() {
                 setAlpacaSecret("");
                 setKrakenKey("");
                 setKrakenSecret("");
+                setPlaidClientId("");
+                setPlaidSecret("");
               }
             } finally {
               setSubmitting(false);
