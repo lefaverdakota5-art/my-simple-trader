@@ -193,6 +193,32 @@ def _plaid_transfer_enabled() -> bool:
     return _env_bool("PLAID_ENABLE_TRANSFERS", False)
 
 
+def _plaid_processor_enabled() -> bool:
+    return _env_bool("PLAID_ENABLE_PROCESSOR", True)
+
+
+def _db_get_plaid_access_token(user_id: str) -> str | None:
+    conn = _db()
+    row = conn.execute(
+        "SELECT access_token FROM plaid_item WHERE user_id=?",
+        (user_id,),
+    ).fetchone()
+    if not row:
+        return None
+    return str(row[0])
+
+
+def _db_get_primary_plaid_account_id(user_id: str) -> str | None:
+    conn = _db()
+    row = conn.execute(
+        "SELECT account_id FROM plaid_account WHERE user_id=? ORDER BY is_primary DESC LIMIT 1",
+        (user_id,),
+    ).fetchone()
+    if not row:
+        return None
+    return str(row[0])
+
+
 class PushUpdateClient:
     def __init__(self, url: str, webhook_secret: str | None) -> None:
         self._url = url
@@ -728,6 +754,93 @@ async def plaid_get_accounts(authorization: str | None = Header(default=None)) -
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+@app.post("/plaid/processor_token_create")
+async def plaid_processor_token_create(
+    body: dict[str, Any],
+    authorization: str | None = Header(default=None),
+) -> JSONResponse:
+    """
+    Creates a Plaid processor token (used to hand off bank auth to a processor partner).
+    This does NOT transfer money; it's only for supported processors (e.g., Stripe, Dwolla, etc.).
+    """
+    if not _plaid_processor_enabled():
+        return JSONResponse({"error": "Processor endpoints disabled"}, status_code=403)
+    if not authorization or not authorization.lower().startswith("bearer "):
+        return JSONResponse({"error": "Missing Authorization Bearer token"}, status_code=401)
+    user_id = _supabase_user_id_from_jwt(authorization.split(" ", 1)[1])
+    if not user_id:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    processor = str(body.get("processor") or "").strip()
+    account_id = str(body.get("account_id") or "").strip()
+    if not processor:
+        return JSONResponse({"error": "processor is required"}, status_code=400)
+    if not account_id:
+        account_id = _db_get_primary_plaid_account_id(user_id) or ""
+    if not account_id:
+        return JSONResponse(
+            {"error": "No account_id provided and no primary Plaid account stored."},
+            status_code=400,
+        )
+
+    access_token = _db_get_plaid_access_token(user_id)
+    if not access_token:
+        return JSONResponse(
+            {"error": "No Plaid bank connected. Go to Banking (Plaid) and connect first."},
+            status_code=400,
+        )
+
+    try:
+        data = _plaid_post(
+            "/processor/token/create",
+            {
+                "access_token": access_token,
+                "account_id": account_id,
+                "processor": processor,
+            },
+        )
+        return JSONResponse({"processor_token": data.get("processor_token")})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/plaid/processor_token_permissions_set")
+async def plaid_processor_token_permissions_set(
+    body: dict[str, Any],
+    authorization: str | None = Header(default=None),
+) -> JSONResponse:
+    """
+    Sets which products a processor_token can access.
+    Example products: ["auth","balance","identity"] (must be enabled on your Plaid account).
+    """
+    if not _plaid_processor_enabled():
+        return JSONResponse({"error": "Processor endpoints disabled"}, status_code=403)
+    if not authorization or not authorization.lower().startswith("bearer "):
+        return JSONResponse({"error": "Missing Authorization Bearer token"}, status_code=401)
+    user_id = _supabase_user_id_from_jwt(authorization.split(" ", 1)[1])
+    if not user_id:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    processor_token = str(body.get("processor_token") or "").strip()
+    products = body.get("products")
+    if not processor_token:
+        return JSONResponse({"error": "processor_token is required"}, status_code=400)
+    if not isinstance(products, list) or not all(isinstance(p, str) for p in products):
+        return JSONResponse({"error": "products must be a string[]"}, status_code=400)
+
+    try:
+        data = _plaid_post(
+            "/processor/token/permissions/set",
+            {
+                "processor_token": processor_token,
+                "products": products,
+            },
+        )
+        return JSONResponse({"success": True, "result": data})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 @app.post("/plaid/withdraw")
 async def plaid_withdraw(
     body: dict[str, Any],
@@ -785,18 +898,12 @@ async def plaid_withdraw(
 
     try:
         # 1) authorization create
-        conn = _db()
-        row = conn.execute(
-            "SELECT access_token FROM plaid_item WHERE user_id=?",
-            (user_id,),
-        ).fetchone()
-        if not row:
+        access_token = _db_get_plaid_access_token(user_id)
+        if not access_token:
             return JSONResponse(
                 {"error": "No Plaid bank connected. Go to Banking (Plaid) and connect first."},
                 status_code=400,
             )
-        access_token = row[0]
-
         authz = _plaid_post(
             "/transfer/authorization/create",
             {
