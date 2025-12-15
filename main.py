@@ -196,6 +196,13 @@ def _plaid_transfer_enabled() -> bool:
 def _plaid_processor_enabled() -> bool:
     return _env_bool("PLAID_ENABLE_PROCESSOR", True)
 
+def _kraken_trading_enabled() -> bool:
+    return _env_bool("KRAKEN_ENABLE_TRADING", False)
+
+
+def _kraken_withdrawals_enabled() -> bool:
+    return _env_bool("KRAKEN_ENABLE_WITHDRAWALS", False)
+
 
 def _db_get_plaid_access_token(user_id: str) -> str | None:
     conn = _db()
@@ -217,6 +224,48 @@ def _db_get_primary_plaid_account_id(user_id: str) -> str | None:
     if not row:
         return None
     return str(row[0])
+
+def _round_down(value: float, decimals: int) -> float:
+    if decimals <= 0:
+        return float(int(value))
+    factor = 10 ** decimals
+    return float(int(value * factor)) / factor
+
+
+def _kraken_public(k: krakenex.API, method: str, data: dict[str, Any] | None = None) -> dict[str, Any]:
+    resp = k.query_public(method, data or {})
+    if resp.get("error"):
+        raise RuntimeError(f"Kraken error: {resp['error']}")
+    return resp.get("result") or {}
+
+
+def _kraken_private(k: krakenex.API, method: str, data: dict[str, Any] | None = None) -> dict[str, Any]:
+    resp = k.query_private(method, data or {})
+    if resp.get("error"):
+        raise RuntimeError(f"Kraken error: {resp['error']}")
+    return resp.get("result") or {}
+
+
+def _kraken_find_usd_pair(asset: str, asset_pairs: dict[str, Any]) -> tuple[str, dict[str, Any]] | None:
+    # Prefer USD (ZUSD) pairs, then USDT, then USDC.
+    preferred_quotes = {"ZUSD", "USD", "USDT", "USDC"}
+    candidates: list[tuple[int, str, dict[str, Any]]] = []
+    for pair_name, meta in asset_pairs.items():
+        base = str(meta.get("base") or "")
+        quote = str(meta.get("quote") or "")
+        if not base or not quote:
+            continue
+        if base != asset:
+            continue
+        if quote not in preferred_quotes:
+            continue
+        rank = {"ZUSD": 0, "USD": 1, "USDT": 2, "USDC": 3}.get(quote, 9)
+        candidates.append((rank, pair_name, meta))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda x: x[0])
+    _, pair_name, meta = candidates[0]
+    return pair_name, meta
 
 
 class PushUpdateClient:
@@ -574,20 +623,73 @@ def _alpaca_close_all_positions(alpaca: TradingClient) -> list[dict[str, Any]]:
 
 
 def _kraken_close_positions_to_cash(kraken_api: KrakenAPI) -> list[dict[str, Any]]:
-    # Kraken order sizing depends on asset precision and valid pairs.
-    # For safety, this implementation only reports balances in this build.
+    # This is a "best effort" implementation using Kraken's official API.
+    # It is guarded behind KRAKEN_ENABLE_TRADING=true to avoid accidental live orders.
     results: list[dict[str, Any]] = []
+    if not _kraken_trading_enabled():
+        try:
+            bal = kraken_api.get_account_balance()
+            for asset, row in bal.iterrows():
+                try:
+                    amount = float(row.iloc[0])
+                except Exception:
+                    continue
+                if amount <= 0:
+                    continue
+                results.append({"asset": str(asset), "balance": amount, "status": "reported"})
+        except Exception as e:
+            results.append({"status": "error", "error": str(e)})
+        results.append(
+            {
+                "status": "note",
+                "message": "Set KRAKEN_ENABLE_TRADING=true to allow market sells (live).",
+            }
+        )
+        return results
+
     try:
-        bal = kraken_api.get_account_balance()
-        # Dataframe: asset -> balance
-        for asset, row in bal.iterrows():
+        # Pull balances and asset pairs from Kraken directly for precision metadata.
+        k = kraken_api.api  # underlying krakenex.API instance
+        balances = _kraken_private(k, "Balance")
+        asset_pairs = _kraken_public(k, "AssetPairs")
+
+        for asset, amount_str in balances.items():
             try:
-                amount = float(row.iloc[0])
+                amount = float(amount_str)
             except Exception:
                 continue
             if amount <= 0:
                 continue
-            results.append({"asset": str(asset), "balance": amount, "status": "reported"})
+            # Skip USD-like balances
+            if asset in {"ZUSD", "USD", "USDT", "USDC"}:
+                continue
+
+            pair_info = _kraken_find_usd_pair(asset, asset_pairs)
+            if not pair_info:
+                results.append({"asset": asset, "balance": amount, "status": "skipped", "reason": "no USD quote pair found"})
+                continue
+
+            pair_name, meta = pair_info
+            lot_decimals = int(meta.get("lot_decimals") or 0)
+            order_min = float(meta.get("ordermin") or 0)
+            volume = _round_down(amount, lot_decimals)
+            if volume <= 0 or (order_min and volume < order_min):
+                results.append(
+                    {"asset": asset, "pair": pair_name, "balance": amount, "volume": volume, "status": "skipped", "reason": "below minimum order size"}
+                )
+                continue
+
+            order = _kraken_private(
+                k,
+                "AddOrder",
+                {
+                    "pair": pair_name,
+                    "type": "sell",
+                    "ordertype": "market",
+                    "volume": f"{volume:.{lot_decimals}f}",
+                },
+            )
+            results.append({"asset": asset, "pair": pair_name, "volume": volume, "status": "submitted", "txid": order.get("txid")})
     except Exception as e:
         results.append({"status": "error", "error": str(e)})
     return results
@@ -632,9 +734,67 @@ async def sell_to_cash(authorization: str | None = Header(default=None)) -> JSON
             "mode": SETTINGS.trading_mode,
             "alpaca": alpaca_results,
             "kraken": kraken_results,
-            "note": "Kraken sell-to-cash requires pair mapping + precision handling; this build reports balances safely.",
+            "note": "Kraken sells are guarded by KRAKEN_ENABLE_TRADING=true.",
         }
     )
+
+
+@app.post("/kraken/withdraw_fiat")
+async def kraken_withdraw_fiat(
+    body: dict[str, Any],
+    authorization: str | None = Header(default=None),
+) -> JSONResponse:
+    """
+    Initiates a Kraken fiat withdrawal using a pre-configured Kraken withdrawal key.
+    You MUST create a withdrawal key in Kraken and set it in the request (or env).
+    """
+    if not authorization or not authorization.lower().startswith("bearer "):
+        return JSONResponse({"error": "Missing Authorization Bearer token"}, status_code=401)
+    user_id = _supabase_user_id_from_jwt(authorization.split(" ", 1)[1])
+    if not user_id:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    if SETTINGS.trading_mode == "dry_run":
+        return JSONResponse({"success": True, "mode": SETTINGS.trading_mode, "status": "skipped (dry_run)"})
+
+    if not _kraken_withdrawals_enabled():
+        return JSONResponse(
+            {
+                "error": "Kraken withdrawals are disabled in this backend.",
+                "how_to_fix": [
+                    "Set KRAKEN_ENABLE_WITHDRAWALS=true on the backend.",
+                    "Create a Kraken withdrawal key (to your bank/Chime) in Kraken.",
+                    "Call this endpoint with that key and amount.",
+                ],
+            },
+            status_code=501,
+        )
+
+    if not (SETTINGS.kraken_key and SETTINGS.kraken_secret):
+        return JSONResponse({"error": "Kraken API keys not configured"}, status_code=400)
+
+    asset = str(body.get("asset") or os.getenv("KRAKEN_WITHDRAW_ASSET", "ZUSD")).strip()
+    key = str(body.get("key") or os.getenv("KRAKEN_WITHDRAW_KEY_USD", "")).strip()
+    amount = body.get("amount")
+    try:
+        amount_num = float(amount)
+    except Exception:
+        amount_num = 0.0
+    if amount_num <= 0:
+        return JSONResponse({"error": "amount must be a positive number"}, status_code=400)
+    if not key:
+        return JSONResponse({"error": "withdrawal key is required (body.key or env KRAKEN_WITHDRAW_KEY_USD)"}, status_code=400)
+
+    try:
+        k = krakenex.API(key=SETTINGS.kraken_key, secret=SETTINGS.kraken_secret)
+        res = _kraken_private(
+            k,
+            "Withdraw",
+            {"asset": asset, "key": key, "amount": f"{amount_num:.2f}"},
+        )
+        return JSONResponse({"success": True, "result": res})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 @app.post("/plaid/create_link_token")
