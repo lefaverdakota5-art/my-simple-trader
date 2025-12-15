@@ -125,19 +125,15 @@ export default function Settings() {
           className="plain-button"
           disabled={submitting || !botUrl}
           onClick={async () => {
-            if (!botUrl) {
-              toast({ title: "Missing backend URL", description: "Set Bot Backend URL first.", variant: "destructive" });
-              return;
-            }
             const { data } = await supabase.auth.getSession();
             const token = data.session?.access_token;
             if (!token) return;
             setSubmitting(true);
             try {
-              const r = await fetch(`${botUrl.replace(/\/+$/, "")}/config/set_keys`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-                body: JSON.stringify({
+              // Prefer Supabase Edge Function so you don't need a separate backend server.
+              const { data: resp, error } = await supabase.functions.invoke("bot-actions", {
+                body: {
+                  action: "set_keys",
                   alpaca_api_key: alpacaKey,
                   alpaca_secret: alpacaSecret,
                   kraken_key: krakenKey,
@@ -145,11 +141,12 @@ export default function Settings() {
                   plaid_client_id: plaidClientId,
                   plaid_secret: plaidSecret,
                   plaid_env: plaidEnv,
-                }),
+                },
               });
-              const resp = await r.json();
-              if (!r.ok) {
-                toast({ title: "Failed", description: resp?.error || "Could not save keys", variant: "destructive" });
+              if (error) {
+                toast({ title: "Failed", description: error.message, variant: "destructive" });
+              } else if (resp?.error) {
+                toast({ title: "Failed", description: String(resp.error), variant: "destructive" });
               } else {
                 toast({ title: "Saved", description: "Keys stored on backend. Restart backend to apply to bots." });
                 setAlpacaKey("");
