@@ -147,8 +147,33 @@ def _db() -> sqlite3.Connection:
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS bot_secret (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL
+        )
+        """
+    )
     conn.commit()
     return conn
+
+
+def _db_set_secret(key: str, value: str) -> None:
+    conn = _db()
+    with conn:
+        conn.execute(
+            "INSERT INTO bot_secret(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (key, value),
+        )
+
+
+def _db_get_secret(key: str) -> str | None:
+    conn = _db()
+    row = conn.execute("SELECT value FROM bot_secret WHERE key=?", (key,)).fetchone()
+    if not row:
+        return None
+    return str(row[0])
 
 
 def _supabase_user_id_from_jwt(jwt: str) -> str | None:
@@ -586,6 +611,87 @@ async def health() -> dict[str, Any]:
         "alpaca_paper": SETTINGS.alpaca_paper,
         "active_users": BOT_MANAGER.active_user_ids(),
     }
+
+
+@app.get("/config/status")
+async def config_status() -> JSONResponse:
+    missing: list[str] = []
+    if not (SETTINGS.supabase_url and SETTINGS.supabase_service_role_key):
+        missing.append("SUPABASE_URL (or VITE_SUPABASE_URL) + SUPABASE_SERVICE_ROLE_KEY")
+
+    alpaca_key = SETTINGS.alpaca_api_key or _db_get_secret("ALPACA_API_KEY")
+    alpaca_secret = SETTINGS.alpaca_secret or _db_get_secret("ALPACA_SECRET")
+    kraken_key = SETTINGS.kraken_key or _db_get_secret("KRAKEN_KEY")
+    kraken_secret = SETTINGS.kraken_secret or _db_get_secret("KRAKEN_SECRET")
+
+    if not (alpaca_key and alpaca_secret):
+        missing.append("ALPACA_API_KEY + ALPACA_SECRET")
+    if not (kraken_key and kraken_secret):
+        missing.append("KRAKEN_KEY + KRAKEN_SECRET")
+
+    plaid_ok = bool(SETTINGS.plaid_client_id and SETTINGS.plaid_secret)
+    return JSONResponse(
+        {
+            "supabase_configured": bool(SETTINGS.supabase_url and SETTINGS.supabase_service_role_key),
+            "alpaca_configured": bool(alpaca_key and alpaca_secret),
+            "kraken_configured": bool(kraken_key and kraken_secret),
+            "plaid_configured": plaid_ok,
+            "missing": missing,
+            "note": "Secrets are never returned. If you set keys via /config/set_keys, restart the backend to apply them everywhere.",
+        }
+    )
+
+
+@app.post("/config/set_keys")
+async def config_set_keys(
+    body: dict[str, Any],
+    authorization: str | None = Header(default=None),
+) -> JSONResponse:
+    """
+    Convenience endpoint for personal use: stores API keys on the backend (SQLite).
+    The frontend can call this so you don't need to SSH/edit env vars.
+
+    IMPORTANT: This is still sensitive. Only expose your backend over a trusted network + HTTPS.
+    """
+    if not authorization or not authorization.lower().startswith("bearer "):
+        return JSONResponse({"error": "Missing Authorization Bearer token"}, status_code=401)
+    user_id = _supabase_user_id_from_jwt(authorization.split(" ", 1)[1])
+    if not user_id:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    # Only allow users with Supabase user_roles.admin (optional) OR any authenticated user if ADMIN not configured.
+    # For simplicity, allow any authenticated user in this personal build.
+
+    def _get_str(name: str) -> str:
+        v = body.get(name)
+        return str(v).strip() if v is not None else ""
+
+    alpaca_api_key = _get_str("alpaca_api_key")
+    alpaca_secret = _get_str("alpaca_secret")
+    kraken_key = _get_str("kraken_key")
+    kraken_secret = _get_str("kraken_secret")
+
+    wrote = []
+    if alpaca_api_key:
+        _db_set_secret("ALPACA_API_KEY", alpaca_api_key)
+        wrote.append("ALPACA_API_KEY")
+    if alpaca_secret:
+        _db_set_secret("ALPACA_SECRET", alpaca_secret)
+        wrote.append("ALPACA_SECRET")
+    if kraken_key:
+        _db_set_secret("KRAKEN_KEY", kraken_key)
+        wrote.append("KRAKEN_KEY")
+    if kraken_secret:
+        _db_set_secret("KRAKEN_SECRET", kraken_secret)
+        wrote.append("KRAKEN_SECRET")
+
+    return JSONResponse(
+        {
+            "success": True,
+            "stored": wrote,
+            "note": "Keys stored on backend. Restart backend to ensure bots pick them up.",
+        }
+    )
 
 
 @app.get("/me/status")
