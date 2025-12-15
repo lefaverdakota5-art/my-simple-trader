@@ -209,6 +209,47 @@ def _supabase_user_id_from_jwt(jwt: str) -> str | None:
         return None
 
 
+def _supabase_get_row(table: str, select: str, filters: dict[str, str]) -> dict[str, Any] | None:
+    if not SETTINGS.supabase_url or not SETTINGS.supabase_service_role_key:
+        return None
+    endpoint = f"{SETTINGS.supabase_url.rstrip('/')}/rest/v1/{table}"
+    params = {"select": select, **filters}
+    r = requests.get(
+        endpoint,
+        headers={
+            "apikey": SETTINGS.supabase_service_role_key,
+            "Authorization": f"Bearer {SETTINGS.supabase_service_role_key}",
+            "Accept": "application/json",
+        },
+        params=params,
+        timeout=15,
+    )
+    if r.status_code != 200:
+        return None
+    rows = r.json() or []
+    return rows[0] if rows else None
+
+
+def _supabase_get_rows(table: str, select: str, filters: dict[str, str]) -> list[dict[str, Any]]:
+    if not SETTINGS.supabase_url or not SETTINGS.supabase_service_role_key:
+        return []
+    endpoint = f"{SETTINGS.supabase_url.rstrip('/')}/rest/v1/{table}"
+    params = {"select": select, **filters}
+    r = requests.get(
+        endpoint,
+        headers={
+            "apikey": SETTINGS.supabase_service_role_key,
+            "Authorization": f"Bearer {SETTINGS.supabase_service_role_key}",
+            "Accept": "application/json",
+        },
+        params=params,
+        timeout=15,
+    )
+    if r.status_code != 200:
+        return []
+    return r.json() or []
+
+
 def _plaid_base_url() -> str:
     if SETTINGS.plaid_env == "production":
         return "https://production.plaid.com"
@@ -729,6 +770,27 @@ async def me_status(authorization: str | None = Header(default=None)) -> JSONRes
     )
 
 
+@app.get("/me/config")
+async def me_config(authorization: str | None = Header(default=None)) -> JSONResponse:
+    if not authorization or not authorization.lower().startswith("bearer "):
+        return JSONResponse({"error": "Missing Authorization Bearer token"}, status_code=401)
+    user_id = _supabase_user_id_from_jwt(authorization.split(" ", 1)[1])
+    if not user_id:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    alpaca_key, alpaca_secret = _get_alpaca_creds()
+    kraken_key, kraken_secret = _get_kraken_creds()
+    return JSONResponse(
+        {
+            "supabase_configured": bool(SETTINGS.supabase_url and SETTINGS.supabase_service_role_key),
+            "plaid_configured": bool(SETTINGS.plaid_client_id and SETTINGS.plaid_secret),
+            "plaid_linked": bool(_db_get_plaid_access_token(user_id)),
+            "alpaca_configured": bool(alpaca_key and alpaca_secret),
+            "kraken_configured": bool(kraken_key and kraken_secret),
+        }
+    )
+
+
 def _alpaca_close_all_positions(alpaca: TradingClient) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
     positions = alpaca.get_all_positions()
@@ -1010,6 +1072,65 @@ async def plaid_exchange_public_token(
         return JSONResponse({"success": True})
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/plaid/import_from_supabase")
+async def plaid_import_from_supabase(authorization: str | None = Header(default=None)) -> JSONResponse:
+    """
+    One-time helper: if you previously connected Plaid through the Supabase edge function,
+    this imports plaid_items/plaid_accounts into the backend SQLite store.
+    """
+    if not authorization or not authorization.lower().startswith("bearer "):
+        return JSONResponse({"error": "Missing Authorization Bearer token"}, status_code=401)
+    user_id = _supabase_user_id_from_jwt(authorization.split(" ", 1)[1])
+    if not user_id:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    if not (SETTINGS.supabase_url and SETTINGS.supabase_service_role_key):
+        return JSONResponse({"error": "Supabase service role not configured on backend"}, status_code=400)
+
+    item = _supabase_get_row(
+        "plaid_items",
+        "user_id,item_id,access_token,institution_name",
+        {"user_id": f"eq.{user_id}"},
+    )
+    if not item or not item.get("access_token") or not item.get("item_id"):
+        return JSONResponse({"error": "No plaid_items row found in Supabase for this user"}, status_code=404)
+
+    accounts = _supabase_get_rows(
+        "plaid_accounts",
+        "account_id,name,mask,type,subtype,is_primary,item_id",
+        {"user_id": f"eq.{user_id}"},
+    )
+
+    conn = _db()
+    with conn:
+        conn.execute(
+            "INSERT INTO plaid_item(user_id,item_id,access_token,institution_name) VALUES(?,?,?,?) "
+            "ON CONFLICT(user_id) DO UPDATE SET item_id=excluded.item_id, access_token=excluded.access_token, institution_name=excluded.institution_name",
+            (
+                user_id,
+                str(item["item_id"]),
+                str(item["access_token"]),
+                str(item.get("institution_name") or ""),
+            ),
+        )
+        if accounts:
+            conn.execute("DELETE FROM plaid_account WHERE user_id=?", (user_id,))
+            for a in accounts:
+                conn.execute(
+                    "INSERT INTO plaid_account(user_id,account_id,name,mask,type,subtype,is_primary) VALUES(?,?,?,?,?,?,?)",
+                    (
+                        user_id,
+                        str(a.get("account_id") or ""),
+                        str(a.get("name") or ""),
+                        str(a.get("mask") or ""),
+                        str(a.get("type") or ""),
+                        str(a.get("subtype") or ""),
+                        1 if a.get("is_primary") else 0,
+                    ),
+                )
+
+    return JSONResponse({"success": True, "imported_accounts": len(accounts)})
 
 
 @app.get("/plaid/accounts")

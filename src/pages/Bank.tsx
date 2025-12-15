@@ -136,6 +136,30 @@ export default function Bank() {
     setLinkToken(data?.link_token ?? null);
   }, [botApiBase, getAccessToken]);
 
+  const importFromSupabase = useCallback(async () => {
+    if (!botApiBase) {
+      toast({
+        title: "Backend not configured",
+        description: "Set Bot Backend URL in Settings.",
+        variant: "destructive",
+      });
+      return;
+    }
+    const token = await getAccessToken();
+    if (!token) return;
+    const r = await fetch(`${botApiBase}/plaid/import_from_supabase`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      toast({ title: "Import failed", description: data?.error || "Unknown error", variant: "destructive" });
+      return;
+    }
+    toast({ title: "Imported", description: "Plaid connection imported to backend." });
+    await refreshAccounts();
+  }, [botApiBase, getAccessToken, refreshAccounts]);
+
   useEffect(() => {
     if (!user) return;
     (async () => {
@@ -271,6 +295,12 @@ export default function Bank() {
       <button className="plain-button" onClick={openPlaid} disabled={!linkToken || linkOpen}>
         {connected ? "Reconnect / Change Bank" : "Connect Bank"}
       </button>
+
+      {!connected && botApiBase && (
+        <button className="plain-button" onClick={importFromSupabase} style={{ marginTop: "8px" }}>
+          Import Existing Plaid Connection
+        </button>
+      )}
 
       <div style={{ marginTop: "24px" }}>
         <h2 className="medium-text" style={{ fontWeight: 600, marginBottom: "12px" }}>

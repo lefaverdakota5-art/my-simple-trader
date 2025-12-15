@@ -8,7 +8,9 @@ export default function Dashboard() {
   const { user, loading: authLoading, signOut, initializeTraderState } = useAuth();
   const { state, trades, loading: stateLoading, toggleSwarm, toggleAutonomy } = useTraderState(user?.id || null);
   const navigate = useNavigate();
-  const [backendStatus, setBackendStatus] = useState<null | { ok: boolean; botActive?: boolean }>(null);
+  const [backendStatus, setBackendStatus] = useState<
+    null | { ok: boolean; botActive?: boolean; plaidLinked?: boolean; alpaca?: boolean; kraken?: boolean }
+  >(null);
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -35,9 +37,18 @@ export default function Dashboard() {
         return;
       }
       try {
-        const r = await fetch(`${base}/me/status`, { headers: { Authorization: `Bearer ${token}` } });
-        const data = await r.json();
-        setBackendStatus({ ok: r.ok, botActive: Boolean(data?.bot_active) });
+        const r1 = await fetch(`${base}/me/status`, { headers: { Authorization: `Bearer ${token}` } });
+        const d1 = await r1.json();
+        const r2 = await fetch(`${base}/me/config`, { headers: { Authorization: `Bearer ${token}` } });
+        const d2 = await r2.json();
+        const ok = r1.ok && r2.ok;
+        setBackendStatus({
+          ok,
+          botActive: Boolean(d1?.bot_active),
+          plaidLinked: Boolean(d2?.plaid_linked),
+          alpaca: Boolean(d2?.alpaca_configured),
+          kraken: Boolean(d2?.kraken_configured),
+        });
       } catch {
         setBackendStatus({ ok: false });
       }
@@ -97,6 +108,13 @@ export default function Dashboard() {
               : "Connected • Bot Idle"
             : "Not reachable"}
       </p>
+
+      {backendStatus?.ok && (
+        <p className="medium-text" style={{ marginBottom: '16px' }}>
+          Connections: Plaid {backendStatus.plaidLinked ? "OK" : "Missing"} • Alpaca{" "}
+          {backendStatus.alpaca ? "OK" : "Missing"} • Kraken {backendStatus.kraken ? "OK" : "Missing"}
+        </p>
+      )}
 
       {/* Control Buttons */}
       <button
