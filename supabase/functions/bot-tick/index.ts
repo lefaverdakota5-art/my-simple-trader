@@ -21,12 +21,13 @@ function envBool(name: string, fallback: boolean) {
 
 async function krakenPctChange(pair: string): Promise<number> {
   const r = await fetch(`https://api.kraken.com/0/public/Ticker?pair=${encodeURIComponent(pair)}`);
-  const data = (await r.json()) as { error?: unknown; result?: Record<string, any> };
+  const data = (await r.json()) as { error?: unknown; result?: Record<string, unknown> };
   if (Array.isArray(data.error) && data.error.length) return 0;
-  const first = data.result ? Object.values(data.result)[0] : null;
+  const first = data.result ? (Object.values(data.result)[0] as Record<string, unknown> | undefined) : undefined;
   if (!first) return 0;
-  const last = Number(first.c?.[0] ?? 0);
-  const open = Number(first.o ?? 0);
+  const c = first["c"];
+  const last = Number(Array.isArray(c) ? c[0] : 0);
+  const open = Number(first["o"] ?? 0);
   if (!open) return 0;
   return (last / open - 1) * 100;
 }
@@ -80,7 +81,11 @@ async function alpacaPlaceOrder(opts: {
       return { raw: text };
     }
   })();
-  if (!r.ok) throw new Error((data as any)?.message || `Alpaca order failed (${r.status})`);
+  const message =
+    data && typeof data === "object" && "message" in data && typeof (data as { message?: unknown }).message === "string"
+      ? (data as { message: string }).message
+      : undefined;
+  if (!r.ok) throw new Error(message || `Alpaca order failed (${r.status})`);
   return data;
 }
 
