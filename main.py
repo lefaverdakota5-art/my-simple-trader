@@ -592,6 +592,8 @@ async def me_status(authorization: str | None = Header(default=None)) -> JSONRes
             "bot_active": user_id in set(BOT_MANAGER.active_user_ids()),
             "trading_mode": SETTINGS.trading_mode,
             "alpaca_paper": SETTINGS.alpaca_paper,
+            "kraken_trading_enabled": _kraken_trading_enabled(),
+            "kraken_withdrawals_enabled": _kraken_withdrawals_enabled(),
         }
     )
 

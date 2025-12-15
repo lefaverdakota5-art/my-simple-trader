@@ -4,7 +4,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useTraderState } from '@/hooks/useTraderState';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/hooks/use-toast';
-import { getBotApiBaseUrl, getSupabaseAccessToken } from "@/lib/botApi";
+import { getBotApiBaseUrl, getKrakenWithdrawAsset, getKrakenWithdrawKeyUsd, getSupabaseAccessToken } from "@/lib/botApi";
 
 export default function Withdraw() {
   const { user, loading: authLoading } = useAuth();
@@ -16,6 +16,8 @@ export default function Withdraw() {
   const [withdrawType, setWithdrawType] = useState('bank');
   const [submitting, setSubmitting] = useState(false);
   const [withdrawals, setWithdrawals] = useState<WithdrawalRequest[]>([]);
+  const [krakenKey, setKrakenKey] = useState("");
+  const [krakenAsset, setKrakenAsset] = useState("ZUSD");
 
   interface WithdrawalRequest {
     id: string;
@@ -47,6 +49,11 @@ export default function Withdraw() {
 
     fetchWithdrawals();
   }, [user]);
+
+  useEffect(() => {
+    setKrakenKey(getKrakenWithdrawKeyUsd());
+    setKrakenAsset(getKrakenWithdrawAsset());
+  }, []);
 
   const getAccessToken = async () => getSupabaseAccessToken();
 
@@ -114,6 +121,45 @@ export default function Withdraw() {
         toast({ title: "Withdrawal failed", description: data?.error || "Unknown error", variant: "destructive" });
       } else {
         toast({ title: "Withdrawal submitted", description: "If enabled, Plaid Transfer will process the payout." });
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleWithdrawViaKraken = async () => {
+    if (!botApiBase) {
+      toast({
+        title: "Backend not configured",
+        description: "Set Bot Backend URL in Settings.",
+        variant: "destructive",
+      });
+      return;
+    }
+    const numAmount = parseFloat(amount);
+    if (isNaN(numAmount) || numAmount <= 0) {
+      toast({ title: "Error", description: "Enter a valid amount", variant: "destructive" });
+      return;
+    }
+    if (!krakenKey.trim()) {
+      toast({ title: "Missing Kraken withdraw key", description: "Set it in Settings.", variant: "destructive" });
+      return;
+    }
+    const token = await getAccessToken();
+    if (!token) return;
+
+    setSubmitting(true);
+    try {
+      const r = await fetch(`${botApiBase}/kraken/withdraw_fiat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ amount: numAmount, asset: krakenAsset, key: krakenKey }),
+      });
+      const data = await r.json();
+      if (!r.ok) {
+        toast({ title: "Kraken withdraw failed", description: data?.error || "Unknown error", variant: "destructive" });
+      } else {
+        toast({ title: "Kraken withdraw submitted", description: "Check Kraken withdraw status." });
       }
     } finally {
       setSubmitting(false);
@@ -260,6 +306,15 @@ export default function Withdraw() {
         style={{ marginBottom: '16px', fontWeight: '600' }}
       >
         {submitting ? 'Please wait...' : 'Withdraw via Plaid (if enabled)'}
+      </button>
+
+      <button
+        className="plain-button"
+        onClick={handleWithdrawViaKraken}
+        disabled={submitting}
+        style={{ marginBottom: '16px', fontWeight: '600' }}
+      >
+        {submitting ? 'Please wait...' : 'Withdraw USD via Kraken (if enabled)'}
       </button>
 
       <button
