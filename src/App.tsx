@@ -8,6 +8,7 @@ import Dashboard from "./pages/Dashboard";
 import Council from "./pages/Council";
 import Withdraw from "./pages/Withdraw";
 import Install from "./pages/Install";
+import Bank from "./pages/Bank";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -24,6 +25,7 @@ const App = () => (
           <Route path="/council" element={<Council />} />
           <Route path="/withdraw" element={<Withdraw />} />
           <Route path="/install" element={<Install />} />
+          <Route path="/bank" element={<Bank />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>

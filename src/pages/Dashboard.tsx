@@ -99,6 +99,13 @@ export default function Dashboard() {
         Withdraw Money
       </button>
 
+      <button
+        className="plain-button"
+        onClick={() => navigate('/bank')}
+      >
+        Banking (Plaid)
+      </button>
+
       {/* Recent Trades */}
       <h2 className="medium-text" style={{ marginTop: '24px', fontWeight: '600' }}>
         Recent Trades
