@@ -176,6 +176,20 @@ def _db_get_secret(key: str) -> str | None:
     return str(row[0])
 
 
+def _get_alpaca_creds() -> tuple[str | None, str | None]:
+    return (
+        SETTINGS.alpaca_api_key or _db_get_secret("ALPACA_API_KEY"),
+        SETTINGS.alpaca_secret or _db_get_secret("ALPACA_SECRET"),
+    )
+
+
+def _get_kraken_creds() -> tuple[str | None, str | None]:
+    return (
+        SETTINGS.kraken_key or _db_get_secret("KRAKEN_KEY"),
+        SETTINGS.kraken_secret or _db_get_secret("KRAKEN_SECRET"),
+    )
+
+
 def _supabase_user_id_from_jwt(jwt: str) -> str | None:
     if not SETTINGS.supabase_url or not SETTINGS.supabase_service_role_key:
         return None
@@ -545,17 +559,19 @@ class BotManager:
         else:
             print("[bot-manager] SUPABASE_SERVICE_ROLE_KEY not set; cannot auto-start bots from swarm_active")
 
-        if self._settings.alpaca_api_key and self._settings.alpaca_secret:
+        alpaca_key, alpaca_secret = _get_alpaca_creds()
+        if alpaca_key and alpaca_secret:
             self._alpaca = TradingClient(
-                self._settings.alpaca_api_key,
-                self._settings.alpaca_secret,
+                alpaca_key,
+                alpaca_secret,
                 paper=self._settings.alpaca_paper,
             )
         else:
             print("[bot-manager] Alpaca keys not set; stock trading disabled")
 
-        if self._settings.kraken_key and self._settings.kraken_secret:
-            k = krakenex.API(key=self._settings.kraken_key, secret=self._settings.kraken_secret)
+        kraken_key, kraken_secret = _get_kraken_creds()
+        if kraken_key and kraken_secret:
+            k = krakenex.API(key=kraken_key, secret=kraken_secret)
             self._kraken = KrakenAPI(k)
         else:
             print("[bot-manager] Kraken keys not set; crypto signals degraded")
@@ -832,16 +848,18 @@ async def sell_to_cash(authorization: str | None = Header(default=None)) -> JSON
 
     # Alpaca (stocks)
     alpaca_results: Any = {"status": "not_configured"}
-    if SETTINGS.alpaca_api_key and SETTINGS.alpaca_secret:
+    alpaca_key, alpaca_secret = _get_alpaca_creds()
+    if alpaca_key and alpaca_secret:
         alpaca = TradingClient(
-            SETTINGS.alpaca_api_key, SETTINGS.alpaca_secret, paper=SETTINGS.alpaca_paper
+            alpaca_key, alpaca_secret, paper=SETTINGS.alpaca_paper
         )
         alpaca_results = _alpaca_close_all_positions(alpaca)
 
     # Kraken (crypto) - safe reporting only in this build
     kraken_results: Any = {"status": "not_configured"}
-    if SETTINGS.kraken_key and SETTINGS.kraken_secret:
-        k = krakenex.API(key=SETTINGS.kraken_key, secret=SETTINGS.kraken_secret)
+    kraken_key, kraken_secret = _get_kraken_creds()
+    if kraken_key and kraken_secret:
+        k = krakenex.API(key=kraken_key, secret=kraken_secret)
         kraken_api = KrakenAPI(k)
         kraken_results = _kraken_close_positions_to_cash(kraken_api)
 
@@ -887,7 +905,8 @@ async def kraken_withdraw_fiat(
             status_code=501,
         )
 
-    if not (SETTINGS.kraken_key and SETTINGS.kraken_secret):
+    kraken_key, kraken_secret = _get_kraken_creds()
+    if not (kraken_key and kraken_secret):
         return JSONResponse({"error": "Kraken API keys not configured"}, status_code=400)
 
     asset = str(body.get("asset") or os.getenv("KRAKEN_WITHDRAW_ASSET", "ZUSD")).strip()
@@ -903,7 +922,7 @@ async def kraken_withdraw_fiat(
         return JSONResponse({"error": "withdrawal key is required (body.key or env KRAKEN_WITHDRAW_KEY_USD)"}, status_code=400)
 
     try:
-        k = krakenex.API(key=SETTINGS.kraken_key, secret=SETTINGS.kraken_secret)
+        k = krakenex.API(key=kraken_key, secret=kraken_secret)
         res = _kraken_private(
             k,
             "Withdraw",
