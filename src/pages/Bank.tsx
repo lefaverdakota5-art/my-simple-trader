@@ -53,6 +53,7 @@ export default function Bank() {
   const botApiBase = getBotApiBaseUrl();
 
   const [loading, setLoading] = useState(true);
+  const [errorText, setErrorText] = useState<string | null>(null);
   const [connected, setConnected] = useState(false);
   const [institutionName, setInstitutionName] = useState<string | null>(null);
   const [accounts, setAccounts] = useState<PlaidAccount[]>([]);
@@ -74,7 +75,34 @@ export default function Bank() {
 
   const getAccessToken = useCallback(async () => getSupabaseAccessToken(), []);
 
+  const asRecord = (v: unknown): Record<string, unknown> => {
+    if (v && typeof v === "object" && !Array.isArray(v)) return v as Record<string, unknown>;
+    return {};
+  };
+
+  const fetchJson = useCallback(
+    async (url: string, init?: RequestInit, timeoutMs = 12000): Promise<{ ok: boolean; data: unknown }> => {
+      const controller = new AbortController();
+      const t = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const r = await fetch(url, { ...init, signal: controller.signal });
+        const text = await r.text();
+        let data: unknown = {};
+        try {
+          data = text ? JSON.parse(text) : {};
+        } catch {
+          data = { raw: text };
+        }
+        return { ok: r.ok, data };
+      } finally {
+        clearTimeout(t);
+      }
+    },
+    [],
+  );
+
   const refreshAccounts = useCallback(async () => {
+    setErrorText(null);
     // Prefer backend direct Plaid (no Supabase edge function setup required)
     if (botApiBase) {
       const token = await getAccessToken();
@@ -82,17 +110,25 @@ export default function Bank() {
         toast({ title: "Auth error", description: "No session token found", variant: "destructive" });
         return;
       }
-      const r = await fetch(`${botApiBase}/plaid/accounts`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await r.json();
-      if (!r.ok) {
-        toast({ title: "Plaid error", description: data?.error || "Failed to load accounts", variant: "destructive" });
-        return;
+      try {
+        const { ok, data } = await fetchJson(`${botApiBase}/plaid/accounts`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const d = asRecord(data);
+        if (!ok) {
+          const msg = typeof d.error === "string" ? d.error : "Failed to load accounts";
+          setErrorText(msg);
+          toast({ title: "Plaid error", description: msg, variant: "destructive" });
+          return;
+        }
+        setConnected(Boolean(d.connected));
+        setInstitutionName(typeof d.institution_name === "string" ? d.institution_name : null);
+        setAccounts(Array.isArray(d.accounts) ? (d.accounts as PlaidAccount[]) : []);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "Network error";
+        setErrorText(msg);
+        toast({ title: "Network error", description: msg, variant: "destructive" });
       }
-      setConnected(Boolean(data?.connected));
-      setInstitutionName(data?.institution_name ?? null);
-      setAccounts((data?.accounts ?? []) as PlaidAccount[]);
       return;
     }
 
@@ -101,28 +137,42 @@ export default function Bank() {
       body: { action: "get_accounts" },
     });
     if (error) {
+      setErrorText(error.message);
       toast({ title: "Plaid error", description: error.message, variant: "destructive" });
       return;
     }
     setConnected(Boolean(data?.connected));
     setInstitutionName(data?.institution_name ?? null);
     setAccounts((data?.accounts ?? []) as PlaidAccount[]);
-  }, [botApiBase, getAccessToken]);
+  }, [botApiBase, getAccessToken, fetchJson]);
 
   const createLinkToken = useCallback(async () => {
+    setErrorText(null);
     if (botApiBase) {
       const token = await getAccessToken();
       if (!token) return;
-      const r = await fetch(`${botApiBase}/plaid/create_link_token`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await r.json();
-      if (!r.ok) {
-        toast({ title: "Plaid error", description: data?.error || "Failed to create link token", variant: "destructive" });
-        return;
+      try {
+        const { ok, data } = await fetchJson(
+          `${botApiBase}/plaid/create_link_token`,
+          {
+            method: "POST",
+            headers: { Authorization: `Bearer ${token}` },
+          },
+          12000,
+        );
+        const d = asRecord(data);
+        if (!ok) {
+          const msg = typeof d.error === "string" ? d.error : "Failed to create link token";
+          setErrorText(msg);
+          toast({ title: "Plaid error", description: msg, variant: "destructive" });
+          return;
+        }
+        setLinkToken(typeof d.link_token === "string" ? d.link_token : null);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "Network error";
+        setErrorText(msg);
+        toast({ title: "Network error", description: msg, variant: "destructive" });
       }
-      setLinkToken(data?.link_token ?? null);
       return;
     }
 
@@ -130,11 +180,12 @@ export default function Bank() {
       body: { action: "create_link_token" },
     });
     if (error) {
+      setErrorText(error.message);
       toast({ title: "Plaid error", description: error.message, variant: "destructive" });
       return;
     }
     setLinkToken(data?.link_token ?? null);
-  }, [botApiBase, getAccessToken]);
+  }, [botApiBase, getAccessToken, fetchJson]);
 
   const importFromSupabase = useCallback(async () => {
     if (!botApiBase) {
@@ -147,26 +198,40 @@ export default function Bank() {
     }
     const token = await getAccessToken();
     if (!token) return;
-    const r = await fetch(`${botApiBase}/plaid/import_from_supabase`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    const data = await r.json().catch(() => ({}));
-    if (!r.ok) {
-      toast({ title: "Import failed", description: data?.error || "Unknown error", variant: "destructive" });
-      return;
+    try {
+      const { ok, data } = await fetchJson(`${botApiBase}/plaid/import_from_supabase`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const d = asRecord(data);
+      if (!ok) {
+        const msg = typeof d.error === "string" ? d.error : "Unknown error";
+        setErrorText(msg);
+        toast({ title: "Import failed", description: msg, variant: "destructive" });
+        return;
+      }
+      toast({ title: "Imported", description: "Plaid connection imported to backend." });
+      await refreshAccounts();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Network error";
+      setErrorText(msg);
+      toast({ title: "Network error", description: msg, variant: "destructive" });
     }
-    toast({ title: "Imported", description: "Plaid connection imported to backend." });
-    await refreshAccounts();
-  }, [botApiBase, getAccessToken, refreshAccounts]);
+  }, [botApiBase, getAccessToken, refreshAccounts, fetchJson]);
 
   useEffect(() => {
     if (!user) return;
     (async () => {
       setLoading(true);
-      await refreshAccounts();
-      await createLinkToken();
-      setLoading(false);
+      try {
+        await refreshAccounts();
+        await createLinkToken();
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "Unexpected error";
+        setErrorText(msg);
+      } finally {
+        setLoading(false);
+      }
     })();
   }, [user, refreshAccounts, createLinkToken]);
 
@@ -180,6 +245,9 @@ export default function Bank() {
     s.src = "https://cdn.plaid.com/link/v2/stable/link-initialize.js";
     s.async = true;
     s.setAttribute("data-plaid-link", "true");
+    s.onerror = () => {
+      setErrorText("Failed to load Plaid Link script (may be blocked in WebView).");
+    };
     document.body.appendChild(s);
   }, [linkToken]);
 
@@ -270,6 +338,12 @@ export default function Bank() {
     return (
       <div className="app-container">
         <p className="big-text">Loading...</p>
+        {errorText && (
+          <p style={{ marginTop: "12px", color: "hsl(var(--destructive))" }}>{errorText}</p>
+        )}
+        <button className="plain-button" style={{ marginTop: "16px" }} onClick={() => navigate("/dashboard")}>
+          Back to Dashboard
+        </button>
       </div>
     );
   }
