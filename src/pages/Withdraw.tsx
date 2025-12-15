@@ -13,7 +13,14 @@ export default function Withdraw() {
   const [amount, setAmount] = useState('');
   const [withdrawType, setWithdrawType] = useState('bank');
   const [submitting, setSubmitting] = useState(false);
-  const [withdrawals, setWithdrawals] = useState<any[]>([]);
+  const [withdrawals, setWithdrawals] = useState<WithdrawalRequest[]>([]);
+
+  interface WithdrawalRequest {
+    id: string;
+    amount: number;
+    status: string;
+    created_at: string;
+  }
 
   useEffect(() => {
     if (!authLoading && !user) {

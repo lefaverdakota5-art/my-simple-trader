@@ -129,9 +129,21 @@ export function useTraderState(userId: string | null) {
 
   const toggleAutonomy = async () => {
     if (!userId || !state) return;
-    
-    // Update local state optimistically since autonomy_mode is a new column
-    setState(prev => prev ? { ...prev, autonomy_mode: !prev.autonomy_mode } : prev);
+
+    // Optimistic UI update
+    const next = !state.autonomy_mode;
+    setState((prev) => (prev ? { ...prev, autonomy_mode: next } : prev));
+
+    const { error } = await supabase
+      .from('trader_state')
+      .update({ autonomy_mode: next })
+      .eq('user_id', userId);
+
+    if (error) {
+      console.error('Error toggling autonomy mode:', error);
+      // Revert optimistic update on failure
+      setState((prev) => (prev ? { ...prev, autonomy_mode: !next } : prev));
+    }
   };
 
   return { state, trades, loading, toggleSwarm, toggleAutonomy };

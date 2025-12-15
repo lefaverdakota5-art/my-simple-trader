@@ -18,7 +18,7 @@ export default function Dashboard() {
     if (user) {
       initializeTraderState(user.id);
     }
-  }, [user]);
+  }, [user, initializeTraderState]);
 
   if (authLoading || stateLoading) {
     return (
