@@ -504,6 +504,23 @@ async def health() -> dict[str, Any]:
     }
 
 
+@app.get("/me/status")
+async def me_status(authorization: str | None = Header(default=None)) -> JSONResponse:
+    if not authorization or not authorization.lower().startswith("bearer "):
+        return JSONResponse({"error": "Missing Authorization Bearer token"}, status_code=401)
+    user_id = _supabase_user_id_from_jwt(authorization.split(" ", 1)[1])
+    if not user_id:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    return JSONResponse(
+        {
+            "user_id": user_id,
+            "bot_active": user_id in set(BOT_MANAGER.active_user_ids()),
+            "trading_mode": SETTINGS.trading_mode,
+            "alpaca_paper": SETTINGS.alpaca_paper,
+        }
+    )
+
+
 def _alpaca_close_all_positions(alpaca: TradingClient) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
     positions = alpaca.get_all_positions()
@@ -768,13 +785,22 @@ async def plaid_withdraw(
 
     try:
         # 1) authorization create
+        conn = _db()
+        row = conn.execute(
+            "SELECT access_token FROM plaid_item WHERE user_id=?",
+            (user_id,),
+        ).fetchone()
+        if not row:
+            return JSONResponse(
+                {"error": "No Plaid bank connected. Go to Banking (Plaid) and connect first."},
+                status_code=400,
+            )
+        access_token = row[0]
+
         authz = _plaid_post(
             "/transfer/authorization/create",
             {
-                "access_token": _db().execute(
-                    "SELECT access_token FROM plaid_item WHERE user_id=?",
-                    (user_id,),
-                ).fetchone()[0],
+                "access_token": access_token,
                 "account_id": auth_account_id,
                 "type": "credit",
                 "network": "ach",
@@ -793,10 +819,7 @@ async def plaid_withdraw(
         transfer = _plaid_post(
             "/transfer/create",
             {
-                "access_token": _db().execute(
-                    "SELECT access_token FROM plaid_item WHERE user_id=?",
-                    (user_id,),
-                ).fetchone()[0],
+                "access_token": access_token,
                 "account_id": auth_account_id,
                 "authorization_id": authorization_id,
                 "type": "credit",

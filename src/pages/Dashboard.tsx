@@ -1,12 +1,14 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { useTraderState } from '@/hooks/useTraderState';
+import { getBotApiBaseUrl, getSupabaseAccessToken } from "@/lib/botApi";
 
 export default function Dashboard() {
   const { user, loading: authLoading, signOut, initializeTraderState } = useAuth();
   const { state, trades, loading: stateLoading, toggleSwarm, toggleAutonomy } = useTraderState(user?.id || null);
   const navigate = useNavigate();
+  const [backendStatus, setBackendStatus] = useState<null | { ok: boolean; botActive?: boolean }>(null);
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -19,6 +21,28 @@ export default function Dashboard() {
       initializeTraderState(user.id);
     }
   }, [user, initializeTraderState]);
+
+  useEffect(() => {
+    (async () => {
+      const base = getBotApiBaseUrl();
+      if (!base) {
+        setBackendStatus(null);
+        return;
+      }
+      const token = await getSupabaseAccessToken();
+      if (!token) {
+        setBackendStatus({ ok: false });
+        return;
+      }
+      try {
+        const r = await fetch(`${base}/me/status`, { headers: { Authorization: `Bearer ${token}` } });
+        const data = await r.json();
+        setBackendStatus({ ok: r.ok, botActive: Boolean(data?.bot_active) });
+      } catch {
+        setBackendStatus({ ok: false });
+      }
+    })();
+  }, [user]);
 
   if (authLoading || stateLoading) {
     return (
@@ -63,6 +87,17 @@ export default function Dashboard() {
         Current Strategy: Predictive Swarm {state?.swarm_active ? 'Active' : 'Inactive'}
       </p>
 
+      <p className="medium-text" style={{ marginBottom: '16px' }}>
+        Backend:{" "}
+        {backendStatus === null
+          ? "Not set"
+          : backendStatus.ok
+            ? backendStatus.botActive
+              ? "Connected • Bot Active"
+              : "Connected • Bot Idle"
+            : "Not reachable"}
+      </p>
+
       {/* Control Buttons */}
       <button
         className="plain-button"
@@ -104,6 +139,13 @@ export default function Dashboard() {
         onClick={() => navigate('/bank')}
       >
         Banking (Plaid)
+      </button>
+
+      <button
+        className="plain-button"
+        onClick={() => navigate('/settings')}
+      >
+        Settings
       </button>
 
       {/* Recent Trades */}

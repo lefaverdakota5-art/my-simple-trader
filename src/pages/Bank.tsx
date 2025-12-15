@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
+import { getBotApiBaseUrl, getSupabaseAccessToken } from "@/lib/botApi";
 
 declare global {
   interface Window {
@@ -49,7 +50,7 @@ type PlaidAccount = {
 export default function Bank() {
   const { user, loading: authLoading } = useAuth();
   const navigate = useNavigate();
-  const botApiBase = (import.meta.env.VITE_BOT_API_URL as string | undefined)?.replace(/\/+$/, "") || "";
+  const botApiBase = getBotApiBaseUrl();
 
   const [loading, setLoading] = useState(true);
   const [connected, setConnected] = useState(false);
@@ -71,11 +72,7 @@ export default function Bank() {
     [],
   );
 
-  const getAccessToken = useCallback(async () => {
-    const { data, error } = await supabase.auth.getSession();
-    if (error) return null;
-    return data.session?.access_token ?? null;
-  }, []);
+  const getAccessToken = useCallback(async () => getSupabaseAccessToken(), []);
 
   const refreshAccounts = useCallback(async () => {
     // Prefer backend direct Plaid (no Supabase edge function setup required)

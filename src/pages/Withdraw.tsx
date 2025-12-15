@@ -4,12 +4,13 @@ import { useAuth } from '@/hooks/useAuth';
 import { useTraderState } from '@/hooks/useTraderState';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/hooks/use-toast';
+import { getBotApiBaseUrl, getSupabaseAccessToken } from "@/lib/botApi";
 
 export default function Withdraw() {
   const { user, loading: authLoading } = useAuth();
   const { state, loading: stateLoading } = useTraderState(user?.id || null);
   const navigate = useNavigate();
-  const botApiBase = (import.meta.env.VITE_BOT_API_URL as string | undefined)?.replace(/\/+$/, "") || "";
+  const botApiBase = getBotApiBaseUrl();
   
   const [amount, setAmount] = useState('');
   const [withdrawType, setWithdrawType] = useState('bank');
@@ -47,11 +48,7 @@ export default function Withdraw() {
     fetchWithdrawals();
   }, [user]);
 
-  const getAccessToken = async () => {
-    const { data, error } = await supabase.auth.getSession();
-    if (error) return null;
-    return data.session?.access_token ?? null;
-  };
+  const getAccessToken = async () => getSupabaseAccessToken();
 
   const handleSellToCash = async () => {
     if (!botApiBase) {
