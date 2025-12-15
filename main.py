@@ -1,6 +1,7 @@
 import asyncio
 import os
-from dataclasses import dataclass
+import sqlite3
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
@@ -10,6 +11,9 @@ from alpaca.trading.client import TradingClient
 from alpaca.trading.enums import OrderSide, TimeInForce
 from alpaca.trading.requests import MarketOrderRequest
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from fastapi import Header
 from pykrakenapi import KrakenAPI
 
 app = FastAPI()
@@ -39,27 +43,154 @@ class Settings:
     max_notional_per_order_usd: float = float(os.getenv("MAX_NOTIONAL_PER_ORDER_USD", "1.00"))
     max_orders_per_day: int = int(os.getenv("MAX_ORDERS_PER_DAY", "20"))
 
+    # Local storage (for personal use)
+    sqlite_path: str = os.getenv("BOT_SQLITE_PATH", "bot_data.sqlite")
+
+    # CORS
+    cors_origins: list[str] = field(
+        default_factory=lambda: [
+            o.strip()
+            for o in os.getenv("BOT_CORS_ORIGINS", "*").split(",")
+            if o.strip()
+        ]
+    )
+
     # Alpaca (stocks)
     alpaca_api_key: str | None = os.getenv("ALPACA_API_KEY")
     alpaca_secret: str | None = os.getenv("ALPACA_SECRET")
     alpaca_paper: bool = _env_bool("ALPACA_PAPER", True)
-    alpaca_symbols: list[str] = [
-        s.strip().upper()
-        for s in os.getenv("ALPACA_SYMBOLS", "AAPL,SPY").split(",")
-        if s.strip()
-    ]
+    alpaca_symbols: list[str] = field(
+        default_factory=lambda: [
+            s.strip().upper()
+            for s in os.getenv("ALPACA_SYMBOLS", "AAPL,SPY").split(",")
+            if s.strip()
+        ]
+    )
 
     # Kraken (crypto)
     kraken_key: str | None = os.getenv("KRAKEN_KEY")
     kraken_secret: str | None = os.getenv("KRAKEN_SECRET")
-    kraken_pairs: list[str] = [
-        s.strip().upper()
-        for s in os.getenv("KRAKEN_PAIRS", "XBTUSD,ETHUSD").split(",")
-        if s.strip()
-    ]
+    kraken_pairs: list[str] = field(
+        default_factory=lambda: [
+            s.strip().upper()
+            for s in os.getenv("KRAKEN_PAIRS", "XBTUSD,ETHUSD").split(",")
+            if s.strip()
+        ]
+    )
+
+    # Plaid (optional; enables bank linking and balances from the backend)
+    plaid_client_id: str | None = os.getenv("PLAID_CLIENT_ID")
+    plaid_secret: str | None = os.getenv("PLAID_SECRET")
+    plaid_env: str = os.getenv("PLAID_ENV", "sandbox").strip().lower()  # sandbox|development|production
+    plaid_products: list[str] = field(
+        default_factory=lambda: [
+            p.strip()
+            for p in os.getenv("PLAID_PRODUCTS", "auth,transactions").split(",")
+            if p.strip()
+        ]
+    )
+    plaid_redirect_uri: str | None = os.getenv("PLAID_REDIRECT_URI")
 
 
 SETTINGS = Settings()
+
+if SETTINGS.cors_origins == ["*"]:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+else:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=SETTINGS.cors_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+
+def _db() -> sqlite3.Connection:
+    conn = sqlite3.connect(SETTINGS.sqlite_path)
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS plaid_item (
+          user_id TEXT PRIMARY KEY,
+          item_id TEXT NOT NULL,
+          access_token TEXT NOT NULL,
+          institution_name TEXT DEFAULT ''
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS plaid_account (
+          user_id TEXT NOT NULL,
+          account_id TEXT NOT NULL,
+          name TEXT DEFAULT '',
+          mask TEXT DEFAULT '',
+          type TEXT DEFAULT '',
+          subtype TEXT DEFAULT '',
+          is_primary INTEGER NOT NULL DEFAULT 0,
+          PRIMARY KEY (user_id, account_id)
+        )
+        """
+    )
+    conn.commit()
+    return conn
+
+
+def _supabase_user_id_from_jwt(jwt: str) -> str | None:
+    if not SETTINGS.supabase_url or not SETTINGS.supabase_service_role_key:
+        return None
+    try:
+        r = requests.get(
+            f"{SETTINGS.supabase_url.rstrip('/')}/auth/v1/user",
+            headers={
+                "apikey": SETTINGS.supabase_service_role_key,
+                "Authorization": f"Bearer {jwt}",
+            },
+            timeout=10,
+        )
+        if r.status_code != 200:
+            return None
+        return str(r.json().get("id"))
+    except Exception:
+        return None
+
+
+def _plaid_base_url() -> str:
+    if SETTINGS.plaid_env == "production":
+        return "https://production.plaid.com"
+    if SETTINGS.plaid_env == "development":
+        return "https://development.plaid.com"
+    return "https://sandbox.plaid.com"
+
+
+def _plaid_post(path: str, payload: dict[str, Any]) -> dict[str, Any]:
+    if not SETTINGS.plaid_client_id or not SETTINGS.plaid_secret:
+        raise RuntimeError("Plaid not configured (PLAID_CLIENT_ID/PLAID_SECRET missing)")
+    body = {
+        "client_id": SETTINGS.plaid_client_id,
+        "secret": SETTINGS.plaid_secret,
+        **payload,
+    }
+    r = requests.post(
+        f"{_plaid_base_url()}{path}",
+        json=body,
+        headers={"Content-Type": "application/json"},
+        timeout=20,
+    )
+    data = r.json()
+    if r.status_code >= 400:
+        raise RuntimeError(data.get("error_message") or f"Plaid error ({r.status_code})")
+    return data
+
+
+def _plaid_transfer_enabled() -> bool:
+    return _env_bool("PLAID_ENABLE_TRANSFERS", False)
 
 
 class PushUpdateClient:
@@ -372,6 +503,315 @@ async def health() -> dict[str, Any]:
         "active_users": BOT_MANAGER.active_user_ids(),
     }
 
+
+def _alpaca_close_all_positions(alpaca: TradingClient) -> list[dict[str, Any]]:
+    results: list[dict[str, Any]] = []
+    positions = alpaca.get_all_positions()
+    for p in positions:
+        symbol = getattr(p, "symbol", None)
+        qty_raw = getattr(p, "qty", None)
+        try:
+            qty = float(qty_raw)
+        except Exception:
+            qty = 0.0
+        if not symbol or qty <= 0:
+            continue
+        try:
+            req = MarketOrderRequest(
+                symbol=str(symbol),
+                qty=qty,
+                side=OrderSide.SELL,
+                time_in_force=TimeInForce.DAY,
+            )
+            alpaca.submit_order(req)
+            results.append({"symbol": str(symbol), "qty": qty, "status": "submitted"})
+        except Exception as e:
+            results.append({"symbol": str(symbol), "qty": qty, "status": "error", "error": str(e)})
+    return results
+
+
+def _kraken_close_positions_to_cash(kraken_api: KrakenAPI) -> list[dict[str, Any]]:
+    # Kraken order sizing depends on asset precision and valid pairs.
+    # For safety, this implementation only reports balances in this build.
+    results: list[dict[str, Any]] = []
+    try:
+        bal = kraken_api.get_account_balance()
+        # Dataframe: asset -> balance
+        for asset, row in bal.iterrows():
+            try:
+                amount = float(row.iloc[0])
+            except Exception:
+                continue
+            if amount <= 0:
+                continue
+            results.append({"asset": str(asset), "balance": amount, "status": "reported"})
+    except Exception as e:
+        results.append({"status": "error", "error": str(e)})
+    return results
+
+
+@app.post("/actions/sell_to_cash")
+async def sell_to_cash(authorization: str | None = Header(default=None)) -> JSONResponse:
+    if not authorization or not authorization.lower().startswith("bearer "):
+        return JSONResponse({"error": "Missing Authorization Bearer token"}, status_code=401)
+    user_id = _supabase_user_id_from_jwt(authorization.split(" ", 1)[1])
+    if not user_id:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    if SETTINGS.trading_mode == "dry_run":
+        return JSONResponse(
+            {
+                "success": True,
+                "mode": SETTINGS.trading_mode,
+                "alpaca": {"status": "skipped (dry_run)"},
+                "kraken": {"status": "skipped (dry_run)"},
+            }
+        )
+
+    # Alpaca (stocks)
+    alpaca_results: Any = {"status": "not_configured"}
+    if SETTINGS.alpaca_api_key and SETTINGS.alpaca_secret:
+        alpaca = TradingClient(
+            SETTINGS.alpaca_api_key, SETTINGS.alpaca_secret, paper=SETTINGS.alpaca_paper
+        )
+        alpaca_results = _alpaca_close_all_positions(alpaca)
+
+    # Kraken (crypto) - safe reporting only in this build
+    kraken_results: Any = {"status": "not_configured"}
+    if SETTINGS.kraken_key and SETTINGS.kraken_secret:
+        k = krakenex.API(key=SETTINGS.kraken_key, secret=SETTINGS.kraken_secret)
+        kraken_api = KrakenAPI(k)
+        kraken_results = _kraken_close_positions_to_cash(kraken_api)
+
+    return JSONResponse(
+        {
+            "success": True,
+            "mode": SETTINGS.trading_mode,
+            "alpaca": alpaca_results,
+            "kraken": kraken_results,
+            "note": "Kraken sell-to-cash requires pair mapping + precision handling; this build reports balances safely.",
+        }
+    )
+
+
+@app.post("/plaid/create_link_token")
+async def plaid_create_link_token(authorization: str | None = Header(default=None)) -> JSONResponse:
+    if not authorization or not authorization.lower().startswith("bearer "):
+        return JSONResponse({"error": "Missing Authorization Bearer token"}, status_code=401)
+    user_id = _supabase_user_id_from_jwt(authorization.split(" ", 1)[1])
+    if not user_id:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    try:
+        payload: dict[str, Any] = {
+            "user": {"client_user_id": user_id},
+            "client_name": "AI Trader",
+            "products": SETTINGS.plaid_products,
+            "country_codes": ["US"],
+            "language": "en",
+        }
+        if SETTINGS.plaid_redirect_uri:
+            payload["redirect_uri"] = SETTINGS.plaid_redirect_uri
+        data = _plaid_post("/link/token/create", payload)
+        return JSONResponse({"link_token": data["link_token"]})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/plaid/exchange_public_token")
+async def plaid_exchange_public_token(
+    body: dict[str, Any],
+    authorization: str | None = Header(default=None),
+) -> JSONResponse:
+    if not authorization or not authorization.lower().startswith("bearer "):
+        return JSONResponse({"error": "Missing Authorization Bearer token"}, status_code=401)
+    user_id = _supabase_user_id_from_jwt(authorization.split(" ", 1)[1])
+    if not user_id:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    public_token = str(body.get("public_token") or "")
+    institution_name = str(body.get("institution_name") or "")
+    accounts = body.get("accounts") or []
+    if not public_token:
+        return JSONResponse({"error": "public_token is required"}, status_code=400)
+
+    try:
+        exchanged = _plaid_post("/item/public_token/exchange", {"public_token": public_token})
+        access_token = exchanged["access_token"]
+        item_id = exchanged["item_id"]
+
+        conn = _db()
+        with conn:
+            conn.execute(
+                "INSERT INTO plaid_item(user_id,item_id,access_token,institution_name) VALUES(?,?,?,?) "
+                "ON CONFLICT(user_id) DO UPDATE SET item_id=excluded.item_id, access_token=excluded.access_token, institution_name=excluded.institution_name",
+                (user_id, item_id, access_token, institution_name),
+            )
+
+            # update accounts (optional)
+            if isinstance(accounts, list) and accounts:
+                conn.execute("UPDATE plaid_account SET is_primary=0 WHERE user_id=?", (user_id,))
+                for idx, a in enumerate(accounts):
+                    account_id = str(a.get("id") or a.get("account_id") or "")
+                    if not account_id:
+                        continue
+                    conn.execute(
+                        "INSERT INTO plaid_account(user_id,account_id,name,mask,type,subtype,is_primary) VALUES(?,?,?,?,?,?,?) "
+                        "ON CONFLICT(user_id,account_id) DO UPDATE SET name=excluded.name, mask=excluded.mask, type=excluded.type, subtype=excluded.subtype, is_primary=excluded.is_primary",
+                        (
+                            user_id,
+                            account_id,
+                            str(a.get("name") or ""),
+                            str(a.get("mask") or ""),
+                            str(a.get("type") or ""),
+                            str(a.get("subtype") or ""),
+                            1 if idx == 0 else 0,
+                        ),
+                    )
+        return JSONResponse({"success": True})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/plaid/accounts")
+async def plaid_get_accounts(authorization: str | None = Header(default=None)) -> JSONResponse:
+    if not authorization or not authorization.lower().startswith("bearer "):
+        return JSONResponse({"error": "Missing Authorization Bearer token"}, status_code=401)
+    user_id = _supabase_user_id_from_jwt(authorization.split(" ", 1)[1])
+    if not user_id:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    try:
+        conn = _db()
+        row = conn.execute(
+            "SELECT access_token, institution_name FROM plaid_item WHERE user_id=?",
+            (user_id,),
+        ).fetchone()
+        if not row:
+            return JSONResponse({"connected": False, "accounts": []})
+        access_token, institution_name = row[0], row[1]
+
+        data = _plaid_post("/accounts/balance/get", {"access_token": access_token})
+        accounts_out = []
+        for a in data.get("accounts", []) or []:
+            accounts_out.append(
+                {
+                    "account_id": a.get("account_id"),
+                    "name": a.get("name"),
+                    "mask": a.get("mask"),
+                    "type": a.get("type"),
+                    "subtype": a.get("subtype"),
+                    "balances": a.get("balances"),
+                }
+            )
+        return JSONResponse(
+            {"connected": True, "institution_name": institution_name, "accounts": accounts_out}
+        )
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/plaid/withdraw")
+async def plaid_withdraw(
+    body: dict[str, Any],
+    authorization: str | None = Header(default=None),
+) -> JSONResponse:
+    """
+    Attempts to create an ACH payout using Plaid Transfer (if enabled on your Plaid account).
+    This is guarded because Plaid Transfer requires approvals + a funding account.
+    """
+    if not authorization or not authorization.lower().startswith("bearer "):
+        return JSONResponse({"error": "Missing Authorization Bearer token"}, status_code=401)
+    user_id = _supabase_user_id_from_jwt(authorization.split(" ", 1)[1])
+    if not user_id:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    amount = body.get("amount")
+    try:
+        amount_num = float(amount)
+    except Exception:
+        amount_num = 0.0
+    if amount_num <= 0:
+        return JSONResponse({"error": "amount must be a positive number"}, status_code=400)
+
+    if SETTINGS.trading_mode == "dry_run":
+        return JSONResponse({"success": True, "mode": SETTINGS.trading_mode, "status": "skipped (dry_run)"})
+
+    if not _plaid_transfer_enabled():
+        return JSONResponse(
+            {
+                "error": "Plaid Transfer is not enabled in this backend.",
+                "how_to_fix": [
+                    "Enable Plaid Transfer for your Plaid account (requires approval).",
+                    "Set PLAID_ENABLE_TRANSFERS=true on the backend.",
+                    "Configure and provide: PLAID_TRANSFER_AUTHORIZATION_ACCOUNT_ID, PLAID_TRANSFER_FUNDING_ACCOUNT_ID (Plaid-side).",
+                ],
+            },
+            status_code=501,
+        )
+
+    # Minimal guarded implementation skeleton (requires your Plaid Transfer configuration).
+    # We intentionally fail with a clear message until the required account IDs are provided.
+    auth_account_id = os.getenv("PLAID_TRANSFER_AUTHORIZATION_ACCOUNT_ID")
+    funding_account_id = os.getenv("PLAID_TRANSFER_FUNDING_ACCOUNT_ID")
+    if not auth_account_id or not funding_account_id:
+        return JSONResponse(
+            {
+                "error": "Missing Plaid Transfer configuration.",
+                "required_env": [
+                    "PLAID_TRANSFER_AUTHORIZATION_ACCOUNT_ID",
+                    "PLAID_TRANSFER_FUNDING_ACCOUNT_ID",
+                ],
+            },
+            status_code=501,
+        )
+
+    try:
+        # 1) authorization create
+        authz = _plaid_post(
+            "/transfer/authorization/create",
+            {
+                "access_token": _db().execute(
+                    "SELECT access_token FROM plaid_item WHERE user_id=?",
+                    (user_id,),
+                ).fetchone()[0],
+                "account_id": auth_account_id,
+                "type": "credit",
+                "network": "ach",
+                "amount": f"{amount_num:.2f}",
+                "ach_class": "ppd",
+                "user": {
+                    "legal_name": "User",
+                },
+            },
+        )
+        authorization_id = authz.get("authorization", {}).get("id")
+        if not authorization_id:
+            raise RuntimeError("Plaid Transfer authorization failed")
+
+        # 2) transfer create
+        transfer = _plaid_post(
+            "/transfer/create",
+            {
+                "access_token": _db().execute(
+                    "SELECT access_token FROM plaid_item WHERE user_id=?",
+                    (user_id,),
+                ).fetchone()[0],
+                "account_id": auth_account_id,
+                "authorization_id": authorization_id,
+                "type": "credit",
+                "network": "ach",
+                "amount": f"{amount_num:.2f}",
+                "ach_class": "ppd",
+                "description": "AI Trader withdrawal",
+                "user": {
+                    "legal_name": "User",
+                },
+            },
+        )
+        return JSONResponse({"success": True, "transfer": transfer})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 if __name__ == "__main__":
     import uvicorn

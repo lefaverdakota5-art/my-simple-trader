@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
@@ -6,9 +6,32 @@ import { toast } from "@/hooks/use-toast";
 
 declare global {
   interface Window {
-    Plaid?: unknown;
+    Plaid?: PlaidLinkGlobal;
   }
 }
+
+type PlaidLinkSuccessMetadata = {
+  institution?: { name?: string | null } | null;
+  accounts?: Array<{
+    id: string;
+    name?: string | null;
+    mask?: string | null;
+    type?: string | null;
+    subtype?: string | null;
+  }> | null;
+};
+
+type PlaidLinkHandler = {
+  open: () => void;
+};
+
+type PlaidLinkGlobal = {
+  create: (config: {
+    token: string;
+    onSuccess: (public_token: string, metadata: PlaidLinkSuccessMetadata) => void | Promise<void>;
+    onExit: () => void | Promise<void>;
+  }) => PlaidLinkHandler;
+};
 
 type PlaidAccount = {
   account_id: string;
@@ -26,6 +49,7 @@ type PlaidAccount = {
 export default function Bank() {
   const { user, loading: authLoading } = useAuth();
   const navigate = useNavigate();
+  const botApiBase = (import.meta.env.VITE_BOT_API_URL as string | undefined)?.replace(/\/+$/, "") || "";
 
   const [loading, setLoading] = useState(true);
   const [connected, setConnected] = useState(false);
@@ -47,7 +71,35 @@ export default function Bank() {
     [],
   );
 
-  const refreshAccounts = async () => {
+  const getAccessToken = useCallback(async () => {
+    const { data, error } = await supabase.auth.getSession();
+    if (error) return null;
+    return data.session?.access_token ?? null;
+  }, []);
+
+  const refreshAccounts = useCallback(async () => {
+    // Prefer backend direct Plaid (no Supabase edge function setup required)
+    if (botApiBase) {
+      const token = await getAccessToken();
+      if (!token) {
+        toast({ title: "Auth error", description: "No session token found", variant: "destructive" });
+        return;
+      }
+      const r = await fetch(`${botApiBase}/plaid/accounts`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await r.json();
+      if (!r.ok) {
+        toast({ title: "Plaid error", description: data?.error || "Failed to load accounts", variant: "destructive" });
+        return;
+      }
+      setConnected(Boolean(data?.connected));
+      setInstitutionName(data?.institution_name ?? null);
+      setAccounts((data?.accounts ?? []) as PlaidAccount[]);
+      return;
+    }
+
+    // Fallback: Supabase edge function
     const { data, error } = await supabase.functions.invoke("plaid", {
       body: { action: "get_accounts" },
     });
@@ -58,9 +110,25 @@ export default function Bank() {
     setConnected(Boolean(data?.connected));
     setInstitutionName(data?.institution_name ?? null);
     setAccounts((data?.accounts ?? []) as PlaidAccount[]);
-  };
+  }, [botApiBase, getAccessToken]);
 
-  const createLinkToken = async () => {
+  const createLinkToken = useCallback(async () => {
+    if (botApiBase) {
+      const token = await getAccessToken();
+      if (!token) return;
+      const r = await fetch(`${botApiBase}/plaid/create_link_token`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await r.json();
+      if (!r.ok) {
+        toast({ title: "Plaid error", description: data?.error || "Failed to create link token", variant: "destructive" });
+        return;
+      }
+      setLinkToken(data?.link_token ?? null);
+      return;
+    }
+
     const { data, error } = await supabase.functions.invoke("plaid", {
       body: { action: "create_link_token" },
     });
@@ -69,7 +137,7 @@ export default function Bank() {
       return;
     }
     setLinkToken(data?.link_token ?? null);
-  };
+  }, [botApiBase, getAccessToken]);
 
   useEffect(() => {
     if (!user) return;
@@ -79,7 +147,7 @@ export default function Bank() {
       await createLinkToken();
       setLoading(false);
     })();
-  }, [user]);
+  }, [user, refreshAccounts, createLinkToken]);
 
   // Load Plaid Link (client-side script).
   useEffect(() => {
@@ -100,11 +168,11 @@ export default function Bank() {
 
     // Wait briefly for Plaid script to load.
     for (let i = 0; i < 50; i++) {
-      if ((window as any).Plaid?.create) break;
+      if (window.Plaid?.create) break;
       await new Promise((r) => setTimeout(r, 100));
     }
 
-    const Plaid = (window as any).Plaid;
+    const Plaid = window.Plaid;
     if (!Plaid?.create) {
       setLinkOpen(false);
       toast({
@@ -117,24 +185,47 @@ export default function Bank() {
 
     const handler = Plaid.create({
       token: linkToken,
-      onSuccess: async (public_token: string, metadata: any) => {
+      onSuccess: async (public_token: string, metadata: PlaidLinkSuccessMetadata) => {
         const institutionName = metadata?.institution?.name ?? "";
-        const accounts = (metadata?.accounts ?? []).map((a: any) => ({
+        const accounts = (metadata?.accounts ?? []).map((a) => ({
           id: a.id,
-          name: a.name,
-          mask: a.mask,
-          type: a.type,
-          subtype: a.subtype,
+          name: a.name ?? null,
+          mask: a.mask ?? null,
+          type: a.type ?? null,
+          subtype: a.subtype ?? null,
         }));
 
-        const { error } = await supabase.functions.invoke("plaid", {
-          body: {
-            action: "exchange_public_token",
-            public_token,
-            institution_name: institutionName,
-            accounts,
-          },
-        });
+        let error: { message: string } | null = null;
+        if (botApiBase) {
+          const token = await getAccessToken();
+          if (!token) {
+            error = { message: "No session token found" };
+          } else {
+            const r = await fetch(`${botApiBase}/plaid/exchange_public_token`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+              body: JSON.stringify({
+                public_token,
+                institution_name: institutionName,
+                accounts,
+              }),
+            });
+            if (!r.ok) {
+              const data = await r.json().catch(() => ({}));
+              error = { message: data?.error || "Failed to exchange token" };
+            }
+          }
+        } else {
+          const resp = await supabase.functions.invoke("plaid", {
+            body: {
+              action: "exchange_public_token",
+              public_token,
+              institution_name: institutionName,
+              accounts,
+            },
+          });
+          error = resp.error ? { message: resp.error.message } : null;
+        }
 
         if (error) {
           toast({ title: "Plaid error", description: error.message, variant: "destructive" });

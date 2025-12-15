@@ -9,6 +9,7 @@ export default function Withdraw() {
   const { user, loading: authLoading } = useAuth();
   const { state, loading: stateLoading } = useTraderState(user?.id || null);
   const navigate = useNavigate();
+  const botApiBase = (import.meta.env.VITE_BOT_API_URL as string | undefined)?.replace(/\/+$/, "") || "";
   
   const [amount, setAmount] = useState('');
   const [withdrawType, setWithdrawType] = useState('bank');
@@ -45,6 +46,82 @@ export default function Withdraw() {
 
     fetchWithdrawals();
   }, [user]);
+
+  const getAccessToken = async () => {
+    const { data, error } = await supabase.auth.getSession();
+    if (error) return null;
+    return data.session?.access_token ?? null;
+  };
+
+  const handleSellToCash = async () => {
+    if (!botApiBase) {
+      toast({
+        title: "Backend not configured",
+        description: "Set VITE_BOT_API_URL so the app can reach your bot service.",
+        variant: "destructive",
+      });
+      return;
+    }
+    const token = await getAccessToken();
+    if (!token) return;
+
+    setSubmitting(true);
+    try {
+      const r = await fetch(`${botApiBase}/actions/sell_to_cash`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await r.json();
+      if (!r.ok) {
+        toast({ title: "Sell to cash failed", description: data?.error || "Unknown error", variant: "destructive" });
+      } else {
+        toast({ title: "Sell to cash started", description: "Check Recent Trades / broker for fills." });
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleWithdrawViaPlaid = async () => {
+    if (!botApiBase) {
+      toast({
+        title: "Backend not configured",
+        description: "Set VITE_BOT_API_URL so the app can reach your bot service.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const numAmount = parseFloat(amount);
+    if (isNaN(numAmount) || numAmount <= 0) {
+      toast({
+        title: 'Error',
+        description: 'Please enter a valid amount',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const token = await getAccessToken();
+    if (!token) return;
+
+    setSubmitting(true);
+    try {
+      const r = await fetch(`${botApiBase}/plaid/withdraw`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ amount: numAmount, destination: withdrawType }),
+      });
+      const data = await r.json();
+      if (!r.ok) {
+        toast({ title: "Withdrawal failed", description: data?.error || "Unknown error", variant: "destructive" });
+      } else {
+        toast({ title: "Withdrawal submitted", description: "If enabled, Plaid Transfer will process the payout." });
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   const handleWithdraw = async () => {
     if (!user) return;
@@ -169,6 +246,24 @@ export default function Withdraw() {
           <option value="convert">Convert Crypto to USD first</option>
         </select>
       </div>
+
+      <button
+        className="plain-button"
+        onClick={handleSellToCash}
+        disabled={submitting}
+        style={{ marginBottom: '8px', fontWeight: '600' }}
+      >
+        {submitting ? 'Please wait...' : 'Sell All Positions to Cash'}
+      </button>
+
+      <button
+        className="plain-button"
+        onClick={handleWithdrawViaPlaid}
+        disabled={submitting}
+        style={{ marginBottom: '16px', fontWeight: '600' }}
+      >
+        {submitting ? 'Please wait...' : 'Withdraw via Plaid (if enabled)'}
+      </button>
 
       <button
         className="plain-button"

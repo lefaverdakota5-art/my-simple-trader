@@ -1,6 +1,12 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { Configuration, PlaidApi, PlaidEnvironments } from "https://esm.sh/plaid@18.3.0";
+import {
+  Configuration,
+  PlaidApi,
+  PlaidEnvironments,
+  type LinkTokenCreateRequest,
+  type Products,
+} from "https://esm.sh/plaid@18.3.0";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -95,14 +101,15 @@ serve(async (req) => {
     if (action === "create_link_token") {
       const redirectUri = Deno.env.get("PLAID_REDIRECT_URI") || undefined;
 
-      const resp = await plaid.linkTokenCreate({
+      const req: LinkTokenCreateRequest = {
         user: { client_user_id: userId },
         client_name: "AI Trader",
-        products: getProducts() as any,
+        products: getProducts() as unknown as Products[],
         country_codes: ["US"],
         language: "en",
         redirect_uri: redirectUri,
-      } as any);
+      };
+      const resp = await plaid.linkTokenCreate(req);
 
       return jsonResponse({ link_token: resp.data.link_token });
     }
@@ -110,7 +117,7 @@ serve(async (req) => {
     if (action === "exchange_public_token") {
       const publicToken = body?.public_token as string | undefined;
       const institutionName = (body?.institution_name as string | undefined) ?? "";
-      const accounts = (body?.accounts as any[] | undefined) ?? [];
+      const accounts = (body?.accounts as unknown[] | undefined) ?? [];
 
       if (!publicToken) return jsonResponse({ error: "public_token is required" }, 400);
 
@@ -135,16 +142,19 @@ serve(async (req) => {
         // Mark all previous as non-primary, then set first account as primary by default.
         await supabaseAdmin.from("plaid_accounts").update({ is_primary: false }).eq("user_id", userId);
 
-        const rows = accounts.map((a, idx) => ({
+        const rows = accounts.map((aRaw, idx) => {
+          const a = (aRaw ?? {}) as Record<string, unknown>;
+          return {
           user_id: userId,
           item_id: itemId,
-          account_id: String(a.id ?? a.account_id ?? ""),
-          name: String(a.name ?? ""),
-          mask: String(a.mask ?? ""),
-          type: String(a.type ?? ""),
-          subtype: String(a.subtype ?? ""),
+          account_id: String((a["id"] as string | undefined) ?? (a["account_id"] as string | undefined) ?? ""),
+          name: String((a["name"] as string | undefined) ?? ""),
+          mask: String((a["mask"] as string | undefined) ?? ""),
+          type: String((a["type"] as string | undefined) ?? ""),
+          subtype: String((a["subtype"] as string | undefined) ?? ""),
           is_primary: idx === 0,
-        })).filter((r) => r.account_id);
+          };
+        }).filter((r) => r.account_id);
 
         if (rows.length) {
           await supabaseAdmin.from("plaid_accounts").upsert(rows, { onConflict: "user_id,account_id" });
