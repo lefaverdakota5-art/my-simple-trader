@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: ai-trader-backend
+    env: docker
+    plan: starter
+    autoDeploy: true
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: "8000"
+      - key: BOT_CORS_ORIGINS
+        value: "*"
+      - key: TRADING_MODE
+        value: "paper"
+
