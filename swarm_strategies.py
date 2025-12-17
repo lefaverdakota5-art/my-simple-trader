@@ -8,7 +8,6 @@ and votes on whether to execute trades.
 
 from typing import Any, Protocol
 from dataclasses import dataclass
-import statistics
 
 
 class TradingStrategy(Protocol):
@@ -96,22 +95,27 @@ class RiskManagementStrategy:
     
     def analyze(self, market_data: dict[str, Any]) -> dict[str, Any]:
         orders_left = market_data.get("orders_left", False)
-        balance = market_data.get("balance", 0.0)
+        balance = market_data.get("balance")
         max_order_size = market_data.get("max_order_size", 0.0)
         
         # Check if we have budget for the trade
-        has_budget = balance is None or balance >= max_order_size
+        # If balance is unknown (None), we conservatively assume insufficient budget
+        has_budget = False
+        if balance is not None and balance >= max_order_size:
+            has_budget = True
         
         return {
             "orders_left": orders_left,
             "has_budget": has_budget,
-            "safe_to_trade": orders_left and has_budget
+            "safe_to_trade": orders_left and has_budget,
+            "balance": balance,
         }
     
     def vote(self, analysis: dict[str, Any]) -> tuple[bool, str]:
         safe_to_trade = analysis.get("safe_to_trade", False)
         orders_left = analysis.get("orders_left", False)
         has_budget = analysis.get("has_budget", False)
+        balance = analysis.get("balance")
         
         if safe_to_trade:
             return True, "Risk limits satisfied"
@@ -119,6 +123,8 @@ class RiskManagementStrategy:
         if not orders_left:
             return False, "Daily order limit reached"
         if not has_budget:
+            if balance is None:
+                return False, "Balance unknown - cannot verify budget"
             return False, "Insufficient balance"
         
         return False, "Risk check failed"

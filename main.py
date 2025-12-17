@@ -31,12 +31,14 @@ try:
     from openai import OpenAI
 except ImportError:
     OpenAI = None  # type: ignore
+    print("[warning] openai package not installed - AI council will be disabled")
 
 try:
     from swarm_strategies import hybrid_council_vote, create_default_swarm
 except ImportError:
     hybrid_council_vote = None  # type: ignore
     create_default_swarm = None  # type: ignore
+    print("[warning] swarm_strategies module not available - traditional strategies will be disabled")
 
 app = FastAPI()
 
@@ -123,6 +125,7 @@ class Settings:
     # Swarm Strategies
     swarm_strategy_mode: str = os.getenv("SWARM_STRATEGY_MODE", "hybrid").strip().lower()  # heuristic|traditional|openai|hybrid
     use_swarm_strategies: bool = _env_bool("USE_SWARM_STRATEGIES", True)
+    council_vote_threshold: float = float(os.getenv("COUNCIL_VOTE_THRESHOLD", "0.8"))  # Fraction of votes needed (0.0-1.0)
 
 
 SETTINGS = Settings()
@@ -656,11 +659,11 @@ REASON: [One concise sentence explaining your decision]"""
                 
             except Exception as e:
                 # If individual AI fails, record it but continue
-                reasons.append(f"{persona['name']}: ERROR - Unable to reach consensus ({str(e)[:50]})")
+                reasons.append(f"{persona['name']}: ERROR - API call failed ({str(e)[:50]})")
                 continue
         
-        # Require 80% consensus (4/5 or higher ratio)
-        threshold = int(ai_count * 0.8)
+        # Use configurable threshold (default 80% consensus)
+        threshold = int(ai_count * SETTINGS.council_vote_threshold)
         approved = votes_yes >= threshold
         
         return f"{votes_yes}/{ai_count}", reasons, approved
@@ -706,6 +709,10 @@ class UserBot:
 
     def _maybe_inc_orders(self) -> None:
         self._orders_today += 1
+    
+    def _get_openai_vote(self, market_data: dict[str, Any], openai_api_key: str, openai_model: str, ai_count: int) -> tuple[str, list[str], bool]:
+        """Helper method to get OpenAI council vote"""
+        return _openai_council_vote(market_data, openai_api_key, openai_model, ai_count)
 
     def _alpaca_equity(self) -> tuple[float | None, float | None]:
         if not self._alpaca:
@@ -813,15 +820,14 @@ class UserBot:
             
             if strategy_mode == "hybrid" and self._settings.use_swarm_strategies and hybrid_council_vote:
                 # Use hybrid approach: traditional strategies + OpenAI
-                def openai_vote_func(data):
-                    if openai_enabled and openai_api_key:
-                        return _openai_council_vote(data, openai_api_key, openai_model, ai_count)
-                    return "0/0", [], False
+                openai_func = None
+                if openai_enabled and openai_api_key:
+                    openai_func = lambda data: self._get_openai_vote(data, openai_api_key, openai_model, ai_count)
                 
                 votes, reasons, approved = hybrid_council_vote(
                     market_data,
                     use_openai=openai_enabled and bool(openai_api_key),
-                    openai_func=openai_vote_func if (openai_enabled and openai_api_key) else None
+                    openai_func=openai_func
                 )
             elif strategy_mode == "traditional" and self._settings.use_swarm_strategies and create_default_swarm:
                 # Use only traditional strategies
@@ -829,11 +835,11 @@ class UserBot:
                 votes, reasons, approved = manager.get_council_vote(market_data)
             elif strategy_mode == "openai" and openai_enabled and openai_api_key:
                 # Use only OpenAI
-                votes, reasons, approved = _openai_council_vote(
+                votes, reasons, approved = self._get_openai_vote(
                     market_data,
-                    openai_api_key=openai_api_key,
-                    model=openai_model,
-                    ai_count=ai_count,
+                    openai_api_key,
+                    openai_model,
+                    ai_count
                 )
             else:
                 # Fallback to heuristic approach
