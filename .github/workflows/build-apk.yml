@@ -1,0 +1,107 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [ main, copilot/implement-upgrades-simple-trader ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Setup Node.js 22
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+        cache: 'npm'
+    
+    - name: Setup Java 17
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: '17'
+    
+    - name: Install dependencies
+      run: npm ci
+    
+    - name: Build web app
+      run: npm run build
+    
+    - name: Setup Android SDK
+      uses: android-actions/setup-android@v3
+    
+    - name: Sync Capacitor
+      run: npx cap sync android
+    
+    - name: Make gradlew executable
+      run: chmod +x android/gradlew
+    
+    - name: Build Debug APK
+      working-directory: android
+      run: ./gradlew assembleDebug
+    
+    - name: Upload Debug APK
+      uses: actions/upload-artifact@v4
+      with:
+        name: app-debug
+        path: android/app/build/outputs/apk/debug/app-debug.apk
+        retention-days: 30
+    
+    - name: Create Release (if on main branch)
+      if: github.ref == 'refs/heads/main'
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: v${{ github.run_number }}
+        name: Release v${{ github.run_number }}
+        body: |
+          ## Simple Trader APK
+          
+          **⚠️ IMPORTANT: This APK starts in PAPER TRADING mode for safety**
+          
+          ### Installation
+          1. Download `app-debug.apk` below
+          2. Transfer to your Samsung Galaxy S20
+          3. Enable "Install from Unknown Sources" in Settings
+          4. Install the APK
+          
+          ### First Time Setup
+          1. Create an account in the app
+          2. Go to Settings and add your API keys:
+             - Kraken API Key & Secret
+             - Alpaca API Key & Secret
+             - OpenAI API Key
+             - Plaid Client ID & Secret (optional)
+          3. Test in paper trading mode for at least 1 week
+          
+          ### Enable Live Trading (After Testing)
+          To enable real trading, you need to configure the backend:
+          1. Deploy the backend (see DEPLOYMENT.md)
+          2. Set these environment variables:
+             - `TRADING_MODE=live`
+             - `KRAKEN_ENABLE_TRADING=true`
+             - `ALPACA_PAPER=false`
+          3. Restart the backend
+          4. Configure backend URL in app Settings
+          
+          **⚠️ WARNING**: Live trading involves real money. Only enable after thorough testing!
+          
+          ### Features
+          - ✅ AI Council with 10 AI personalities
+          - ✅ 6 Traditional trading strategies
+          - ✅ Hybrid voting system
+          - ✅ Kraken crypto trading
+          - ✅ Alpaca stock trading
+          - ✅ Plaid bank integration
+          - ✅ 24/7 autonomous operation
+          
+          See README_SETUP.md for complete documentation.
+        files: |
+          android/app/build/outputs/apk/debug/app-debug.apk
+        draft: false
+        prerelease: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
