@@ -27,10 +27,11 @@ from fastapi.responses import JSONResponse
 from fastapi import Header
 from pykrakenapi import KrakenAPI
 
+# OpenAI is optional; if not installed, the council falls back to deterministic voting
 try:
-    from openai import OpenAI
+    from openai import OpenAI as OpenAIClient
 except ImportError:
-    OpenAI = None  # type: ignore
+    OpenAIClient = None  # type: ignore
 
 app = FastAPI()
 
@@ -557,12 +558,12 @@ def _openai_council_vote(
     Each of 5 AI agents analyzes the market data and votes YES/NO.
     4/5 YES votes are required to approve trading.
     """
-    if not OpenAI:
+    if not OpenAIClient:
         # Fallback to deterministic voting if OpenAI is not installed
         return _council_vote_from_price_change(pct_change, orders_left)
     
     try:
-        client = OpenAI(api_key=openai_api_key)
+        client = OpenAIClient(api_key=openai_api_key)
         
         # Define 5 AI agents with different perspectives
         agents = [
@@ -594,12 +595,13 @@ Market Analysis Request:
 - Orders remaining today: {'Yes' if orders_left else 'No'}
 - Risk limits: Orders left = {orders_left}
 
-Respond with ONLY 'YES' or 'NO' followed by a brief one-sentence reason (max 60 chars).
+Respond with ONLY 'YES' or 'NO' followed by a brief one-sentence reason (max 80 chars).
 Format: YES: [reason] or NO: [reason]
 """
         
         votes = []
         reasons = []
+        max_reason_length = 80
         
         for agent in agents:
             try:
@@ -617,14 +619,16 @@ Format: YES: [reason] or NO: [reason]
                 vote = result.upper().startswith("YES")
                 votes.append(vote)
                 
-                # Format the reason nicely
-                reason_text = result if len(result) < 80 else result[:77] + "..."
+                # Format the reason nicely with consistent truncation
+                reason_text = result if len(result) < max_reason_length else result[:max_reason_length - 3] + "..."
                 reasons.append(f"{agent['name']}: {reason_text}")
                 
             except Exception as e:
                 # If an agent fails, it votes NO by default
+                error_msg = str(e)
+                error_text = error_msg if len(error_msg) < 40 else error_msg[:37] + "..."
                 votes.append(False)
-                reasons.append(f"{agent['name']}: NO (error: {str(e)[:30]})")
+                reasons.append(f"{agent['name']}: NO (error: {error_text})")
         
         yes_count = sum(votes)
         approved = yes_count >= 4
@@ -745,16 +749,20 @@ class UserBot:
             if pct_change is None:
                 pct_change = 0.0
 
-            votes, reasons, approved = (
-                _openai_council_vote(
+            # Get council vote using OpenAI if enabled, otherwise use deterministic voting
+            if self._openai_enabled and self._openai_api_key:
+                votes, reasons, approved = _openai_council_vote(
                     pct_change, 
                     self._orders_left(), 
                     self._openai_api_key, 
                     self._openai_model
                 )
-                if self._openai_enabled and self._openai_api_key
-                else _council_vote_from_price_change(pct_change, self._orders_left())
-            )
+            else:
+                votes, reasons, approved = _council_vote_from_price_change(
+                    pct_change, 
+                    self._orders_left()
+                )
+            
             self._push.send_update(
                 user_id=self._user_id,
                 balance=cash,
