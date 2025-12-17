@@ -27,6 +27,12 @@ from fastapi.responses import JSONResponse
 from fastapi import Header
 from pykrakenapi import KrakenAPI
 
+# OpenAI is optional; if not installed, the council falls back to deterministic voting
+try:
+    from openai import OpenAI as OpenAIClient
+except ImportError:
+    OpenAIClient = None  # type: ignore
+
 app = FastAPI()
 
 
@@ -198,6 +204,13 @@ def _get_plaid_creds() -> tuple[str | None, str | None, str]:
     secret = SETTINGS.plaid_secret or _db_get_secret("PLAID_SECRET")
     env = SETTINGS.plaid_env or (_db_get_secret("PLAID_ENV") or "sandbox")
     return client_id, secret, env.strip().lower() if isinstance(env, str) else "sandbox"
+
+
+def _get_openai_creds() -> tuple[str | None, str]:
+    """Get OpenAI API key and model from DB or env."""
+    api_key = _db_get_secret("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
+    model = _db_get_secret("OPENAI_MODEL") or os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    return api_key, model
 
 
 def _supabase_user_id_from_jwt(jwt: str) -> str | None:
@@ -534,6 +547,99 @@ def _council_vote_from_price_change(pct_change: float, orders_left: bool) -> tup
     return f"{yes}/5", reasons, approved
 
 
+def _openai_council_vote(
+    pct_change: float,
+    orders_left: bool,
+    openai_api_key: str,
+    openai_model: str = "gpt-4o-mini",
+) -> tuple[str, list[str], bool]:
+    """
+    Enhanced council voting using OpenAI for intelligent decision-making.
+    Each of 5 AI agents analyzes the market data and votes YES/NO.
+    4/5 YES votes are required to approve trading.
+    """
+    if not OpenAIClient:
+        # Fallback to deterministic voting if OpenAI is not installed
+        return _council_vote_from_price_change(pct_change, orders_left)
+    
+    try:
+        client = OpenAIClient(api_key=openai_api_key)
+        
+        # Define 5 AI agents with different perspectives
+        agents = [
+            {
+                "name": "Momentum Analyst",
+                "role": "You are a momentum trading expert. Analyze if the price change indicates strong momentum worth trading.",
+            },
+            {
+                "name": "Risk Manager",
+                "role": "You are a conservative risk manager. Assess if the trade risk is acceptable given the volatility.",
+            },
+            {
+                "name": "Technical Analyst",
+                "role": "You are a technical analysis expert. Determine if technical indicators support this trade.",
+            },
+            {
+                "name": "Market Sentiment Analyst",
+                "role": "You are a market sentiment expert. Evaluate if the price change reflects positive market sentiment.",
+            },
+            {
+                "name": "Portfolio Guardian",
+                "role": "You are a portfolio protection specialist. Assess if trading now aligns with daily risk limits.",
+            },
+        ]
+        
+        market_data = f"""
+Market Analysis Request:
+- Price change: {pct_change:.2f}%
+- Orders remaining today: {'Yes' if orders_left else 'No'}
+- Risk limits: Orders left = {orders_left}
+
+Respond with ONLY 'YES' or 'NO' followed by a brief one-sentence reason (max 80 chars).
+Format: YES: [reason] or NO: [reason]
+"""
+        
+        votes = []
+        reasons = []
+        max_reason_length = 80
+        
+        for agent in agents:
+            try:
+                response = client.chat.completions.create(
+                    model=openai_model,
+                    messages=[
+                        {"role": "system", "content": agent["role"]},
+                        {"role": "user", "content": market_data},
+                    ],
+                    max_tokens=50,
+                    temperature=0.7,
+                )
+                
+                result = response.choices[0].message.content.strip()
+                vote = result.upper().startswith("YES")
+                votes.append(vote)
+                
+                # Format the reason nicely with consistent truncation
+                reason_text = result if len(result) < max_reason_length else result[:max_reason_length - 3] + "..."
+                reasons.append(f"{agent['name']}: {reason_text}")
+                
+            except Exception as e:
+                # If an agent fails, it votes NO by default
+                error_msg = str(e)
+                error_text = error_msg if len(error_msg) < 40 else error_msg[:37] + "..."
+                votes.append(False)
+                reasons.append(f"{agent['name']}: NO (error: {error_text})")
+        
+        yes_count = sum(votes)
+        approved = yes_count >= 4
+        
+        return f"{yes_count}/5", reasons, approved
+        
+    except Exception as e:
+        print(f"[openai-council] Error: {e}. Falling back to deterministic voting.")
+        return _council_vote_from_price_change(pct_change, orders_left)
+
+
 class UserBot:
     def __init__(
         self,
@@ -543,12 +649,18 @@ class UserBot:
         alpaca: TradingClient | None,
         kraken: KrakenAPI | None,
         settings: Settings,
+        openai_api_key: str | None = None,
+        openai_model: str = "gpt-4o-mini",
+        openai_enabled: bool = False,
     ) -> None:
         self._user_id = user_id
         self._push = push
         self._alpaca = alpaca
         self._kraken = kraken
         self._settings = settings
+        self._openai_api_key = openai_api_key
+        self._openai_model = openai_model
+        self._openai_enabled = openai_enabled
 
         self._day_key: str = self._today_key()
         self._orders_today: int = 0
@@ -637,7 +749,20 @@ class UserBot:
             if pct_change is None:
                 pct_change = 0.0
 
-            votes, reasons, approved = _council_vote_from_price_change(pct_change, self._orders_left())
+            # Get council vote using OpenAI if enabled, otherwise use deterministic voting
+            if self._openai_enabled and self._openai_api_key:
+                votes, reasons, approved = _openai_council_vote(
+                    pct_change, 
+                    self._orders_left(), 
+                    self._openai_api_key, 
+                    self._openai_model
+                )
+            else:
+                votes, reasons, approved = _council_vote_from_price_change(
+                    pct_change, 
+                    self._orders_left()
+                )
+            
             self._push.send_update(
                 user_id=self._user_id,
                 balance=cash,
@@ -722,7 +847,30 @@ class BotManager:
                 k = krakenex.API(key=kraken_key, secret=kraken_secret)
                 kraken = KrakenAPI(k)
 
-        bot = UserBot(user_id=user_id, push=self._push, alpaca=alpaca, kraken=kraken, settings=self._settings)
+        # Get OpenAI credentials from Supabase or fallback
+        openai_api_key: str | None = None
+        openai_model: str = "gpt-4o-mini"
+        openai_enabled: bool = False
+        
+        if keys:
+            openai_api_key = keys.get("openai_api_key")
+            openai_model = keys.get("openai_model") or "gpt-4o-mini"
+            openai_enabled = bool(keys.get("openai_enabled", False))
+        
+        # Fallback to env / local SQLite
+        if not openai_api_key:
+            openai_api_key, openai_model = _get_openai_creds()
+
+        bot = UserBot(
+            user_id=user_id, 
+            push=self._push, 
+            alpaca=alpaca, 
+            kraken=kraken, 
+            settings=self._settings,
+            openai_api_key=openai_api_key,
+            openai_model=openai_model,
+            openai_enabled=openai_enabled,
+        )
         self._tasks[user_id] = asyncio.create_task(bot.run())
 
     def _ensure_user_stopped(self, user_id: str) -> None:

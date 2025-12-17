@@ -22,3 +22,27 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.db
+*.sqlite
+*.sqlite3
+bot_data.sqlite
+
+# Android
+android/app/build
+android/app/release
+android/.gradle
+android/build
+*.apk
+*.aab
+!android/app/build.gradle
+
+# Secrets
+.env.local
+.env.production.local
