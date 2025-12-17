@@ -27,6 +27,11 @@ from fastapi.responses import JSONResponse
 from fastapi import Header
 from pykrakenapi import KrakenAPI
 
+try:
+    from openai import OpenAI
+except ImportError:
+    OpenAI = None  # type: ignore
+
 app = FastAPI()
 
 
@@ -102,6 +107,12 @@ class Settings:
         ]
     )
     plaid_redirect_uri: str | None = os.getenv("PLAID_REDIRECT_URI")
+
+    # OpenAI (AI Council)
+    openai_api_key: str | None = os.getenv("OPENAI_API_KEY")
+    openai_model: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    openai_enabled: bool = _env_bool("OPENAI_ENABLED", False)
+    swarm_ai_count: int = int(os.getenv("SWARM_AI_COUNT", "5"))
 
 
 SETTINGS = Settings()
@@ -534,6 +545,124 @@ def _council_vote_from_price_change(pct_change: float, orders_left: bool) -> tup
     return f"{yes}/5", reasons, approved
 
 
+def _get_openai_api_key() -> str | None:
+    """Get OpenAI API key from settings or database."""
+    return SETTINGS.openai_api_key or _db_get_secret("OPENAI_API_KEY")
+
+
+def _openai_council_vote(
+    market_data: dict[str, Any],
+    openai_api_key: str | None = None,
+    model: str = "gpt-4o-mini",
+    ai_count: int = 5,
+) -> tuple[str, list[str], bool]:
+    """
+    Enhanced AI council using OpenAI API for intelligent trading decisions.
+    Falls back to heuristic council if OpenAI is not available or disabled.
+    """
+    if not OpenAI or not openai_api_key:
+        # Fallback to heuristic council
+        pct_change = market_data.get("pct_change", 0.0)
+        orders_left = market_data.get("orders_left", True)
+        return _council_vote_from_price_change(pct_change, orders_left)
+    
+    try:
+        client = OpenAI(api_key=openai_api_key)
+        
+        # AI personas with different strategies
+        personas = [
+            {"name": "Momentum Trader", "strategy": "Focus on price momentum and trend analysis"},
+            {"name": "Value Investor", "strategy": "Evaluate fundamental value and risk-reward ratios"},
+            {"name": "Risk Manager", "strategy": "Assess volatility, downside risk, and position sizing"},
+            {"name": "Technical Analyst", "strategy": "Analyze chart patterns, support/resistance levels"},
+            {"name": "Sentiment Analyst", "strategy": "Consider market sentiment and behavioral factors"},
+            {"name": "Macro Economist", "strategy": "Evaluate broader economic conditions and correlations"},
+            {"name": "Quantitative Analyst", "strategy": "Use statistical models and probability analysis"},
+            {"name": "Contrarian", "strategy": "Look for overcrowded trades and reversal opportunities"},
+            {"name": "Swing Trader", "strategy": "Identify short-term trading opportunities"},
+            {"name": "Conservative", "strategy": "Prioritize capital preservation and steady gains"},
+        ]
+        
+        # Use requested number of AI agents (limit to available personas)
+        ai_count = min(ai_count, len(personas))
+        selected_personas = personas[:ai_count]
+        
+        votes_yes = 0
+        reasons = []
+        
+        # Prepare market context
+        context = f"""
+Market Data:
+- Price Change: {market_data.get('pct_change', 0):.2f}%
+- Last Price: ${market_data.get('last_price', 'N/A')}
+- Open Price: ${market_data.get('open_price', 'N/A')}
+- Symbol/Pair: {market_data.get('symbol', 'Unknown')}
+- Orders Remaining Today: {market_data.get('orders_left', 'Yes') if market_data.get('orders_left') else 'No'}
+- Max Order Size: ${market_data.get('max_order_size', 1.0)}
+- Current Balance: ${market_data.get('balance', 'N/A')}
+"""
+        
+        for persona in selected_personas:
+            prompt = f"""You are "{persona['name']}", a trading AI with this strategy: {persona['strategy']}.
+
+{context}
+
+Based on the current market data, should we execute a BUY trade right now?
+Consider:
+1. Your specific trading strategy and expertise
+2. Risk management principles
+3. Current market conditions
+4. The limited order budget
+
+Respond in this exact format:
+VOTE: [YES or NO]
+REASON: [One concise sentence explaining your decision]"""
+            
+            try:
+                response = client.chat.completions.create(
+                    model=model,
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=150,
+                    temperature=0.7,
+                )
+                
+                content = response.choices[0].message.content or ""
+                
+                # Parse the response
+                vote_line = ""
+                reason_line = ""
+                for line in content.strip().split("\n"):
+                    if line.startswith("VOTE:"):
+                        vote_line = line.replace("VOTE:", "").strip()
+                    elif line.startswith("REASON:"):
+                        reason_line = line.replace("REASON:", "").strip()
+                
+                is_yes = "yes" in vote_line.lower()
+                if is_yes:
+                    votes_yes += 1
+                
+                reason_text = f"{persona['name']}: {'YES' if is_yes else 'NO'} - {reason_line or 'Analysis complete'}"
+                reasons.append(reason_text)
+                
+            except Exception as e:
+                # If individual AI fails, record it but continue
+                reasons.append(f"{persona['name']}: ERROR - Unable to reach consensus ({str(e)[:50]})")
+                continue
+        
+        # Require 80% consensus (4/5 or higher ratio)
+        threshold = int(ai_count * 0.8)
+        approved = votes_yes >= threshold
+        
+        return f"{votes_yes}/{ai_count}", reasons, approved
+        
+    except Exception as e:
+        # If OpenAI fails completely, fall back to heuristic council
+        print(f"[openai-council] Failed, falling back to heuristic: {e}")
+        pct_change = market_data.get("pct_change", 0.0)
+        orders_left = market_data.get("orders_left", True)
+        return _council_vote_from_price_change(pct_change, orders_left)
+
+
 class UserBot:
     def __init__(
         self,
@@ -623,21 +752,63 @@ class UserBot:
 
     async def run(self) -> None:
         self._push.send_update(user_id=self._user_id, new_trade="Swarm started")
+        
+        # Get OpenAI settings (check user-specific settings if available)
+        openai_api_key = _get_openai_api_key()
+        openai_enabled = self._settings.openai_enabled
+        openai_model = self._settings.openai_model
+        ai_count = self._settings.swarm_ai_count
+        
         while True:
             self._roll_day()
 
             cash, equity = self._alpaca_equity()
 
-            # Minimal council update using a cheap price-change proxy (no heavy data dependencies).
+            # Gather market data for council decision
             pct_change = None
+            last_price = None
+            open_price = None
+            symbol = None
+            
             for pair in self._settings.kraken_pairs:
                 pct_change = self._kraken_price_change_pct(pair)
                 if pct_change is not None:
+                    symbol = pair
+                    # Try to get actual prices
+                    try:
+                        ticker = self._kraken.get_ticker_information(pair) if self._kraken else None
+                        if ticker is not None and "c" in ticker.columns and "o" in ticker.columns:
+                            last_price = float(ticker["c"].iloc[0][0])
+                            open_price = float(ticker["o"].iloc[0])
+                    except Exception:
+                        pass
                     break
+            
             if pct_change is None:
                 pct_change = 0.0
-
-            votes, reasons, approved = _council_vote_from_price_change(pct_change, self._orders_left())
+            
+            # Prepare market data for AI council
+            market_data = {
+                "pct_change": pct_change,
+                "last_price": last_price,
+                "open_price": open_price,
+                "symbol": symbol or "Unknown",
+                "orders_left": self._orders_left(),
+                "max_order_size": self._settings.max_notional_per_order_usd,
+                "balance": cash,
+            }
+            
+            # Use OpenAI council if enabled and configured, otherwise use heuristic
+            if openai_enabled and openai_api_key:
+                votes, reasons, approved = _openai_council_vote(
+                    market_data,
+                    openai_api_key=openai_api_key,
+                    model=openai_model,
+                    ai_count=ai_count,
+                )
+            else:
+                votes, reasons, approved = _council_vote_from_price_change(pct_change, self._orders_left())
+            
             self._push.send_update(
                 user_id=self._user_id,
                 balance=cash,
@@ -786,12 +957,17 @@ async def config_status() -> JSONResponse:
 
     plaid_client_id, plaid_secret, _ = _get_plaid_creds()
     plaid_ok = bool(plaid_client_id and plaid_secret)
+    openai_key = _get_openai_api_key()
+    openai_ok = bool(openai_key)
+    
     return JSONResponse(
         {
             "supabase_configured": bool(SETTINGS.supabase_url and SETTINGS.supabase_service_role_key),
             "alpaca_configured": bool(alpaca_key and alpaca_secret),
             "kraken_configured": bool(kraken_key and kraken_secret),
             "plaid_configured": plaid_ok,
+            "openai_configured": openai_ok,
+            "openai_enabled": SETTINGS.openai_enabled,
             "missing": missing,
             "note": "Secrets are never returned. If you set keys via /config/set_keys, restart the backend to apply them everywhere.",
         }
@@ -829,6 +1005,7 @@ async def config_set_keys(
     plaid_client_id = _get_str("plaid_client_id")
     plaid_secret = _get_str("plaid_secret")
     plaid_env = _get_str("plaid_env")
+    openai_api_key = _get_str("openai_api_key")
 
     wrote = []
     if alpaca_api_key:
@@ -852,6 +1029,9 @@ async def config_set_keys(
     if plaid_env:
         _db_set_secret("PLAID_ENV", plaid_env)
         wrote.append("PLAID_ENV")
+    if openai_api_key:
+        _db_set_secret("OPENAI_API_KEY", openai_api_key)
+        wrote.append("OPENAI_API_KEY")
 
     return JSONResponse(
         {
@@ -1103,11 +1283,18 @@ async def simulate_run(
 
     started = time.time()
     events: list[dict[str, Any]] = []
+    
+    # Get OpenAI settings for user
+    openai_api_key = _get_openai_api_key()
+    openai_enabled = body.get("use_openai", SETTINGS.openai_enabled)
+    openai_model = SETTINGS.openai_model
+    ai_count = body.get("ai_count", SETTINGS.swarm_ai_count)
 
     while time.time() - started < seconds:
         pct_change = 0.0
         last_price: float | None = None
         open_price: float | None = None
+        symbol = None
 
         for pair in pairs:
             last, open_ = _kraken_public_ticker(pair)
@@ -1115,9 +1302,31 @@ async def simulate_run(
                 last_price = last
                 open_price = open_
                 pct_change = (last / open_ - 1.0) * 100.0
+                symbol = pair
                 break
-
-        votes, reasons, approved = _council_vote_from_price_change(pct_change, orders_left=True)
+        
+        # Prepare market data for AI council
+        market_data = {
+            "pct_change": pct_change,
+            "last_price": last_price,
+            "open_price": open_price,
+            "symbol": symbol or pairs[0] if pairs else "Unknown",
+            "orders_left": True,
+            "max_order_size": SETTINGS.max_notional_per_order_usd,
+            "balance": 10000.0,  # Simulated balance
+        }
+        
+        # Use OpenAI council if enabled
+        if openai_enabled and openai_api_key:
+            votes, reasons, approved = _openai_council_vote(
+                market_data,
+                openai_api_key=openai_api_key,
+                model=openai_model,
+                ai_count=ai_count,
+            )
+        else:
+            votes, reasons, approved = _council_vote_from_price_change(pct_change, orders_left=True)
+        
         alpaca_snapshot = _alpaca_latest_snapshot(symbols)
 
         events.append(

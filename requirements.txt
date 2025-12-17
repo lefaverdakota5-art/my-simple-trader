@@ -5,3 +5,5 @@ pykrakenapi
 krakenex
 polygon-api-client
 requests
+openai
+python-dotenv
