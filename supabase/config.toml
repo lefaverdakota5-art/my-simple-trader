@@ -2,3 +2,9 @@ project_id = "pchaijknfmrddivqjesm"
 
 [functions.push-update]
 verify_jwt = false
+
+[functions.bot-actions]
+verify_jwt = false
+
+[functions.bot-tick]
+verify_jwt = false

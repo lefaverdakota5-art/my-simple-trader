@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { useTraderState } from '@/hooks/useTraderState';
 
-const AI_NAMES = ['AI 1 (Local)', 'AI 2 (Grok)', 'AI 3 (Claude)', 'AI 4 (Gemini)', 'AI 5 (DeepSeek)'];
+const DEFAULT_AI_NAMES = ['AI 1', 'AI 2', 'AI 3', 'AI 4', 'AI 5', 'AI 6', 'AI 7', 'AI 8', 'AI 9', 'AI 10'];
 
 export default function Council() {
   const { user, loading: authLoading } = useAuth();
@@ -24,13 +24,19 @@ export default function Council() {
     );
   }
 
-  // Parse council votes (e.g., "4/5")
+  // Parse council votes (e.g., "4/5" or "6/7")
   const votesStr = state?.council_votes || '0/5';
-  const [yesVotes] = votesStr.split('/').map(Number);
-  const isApproved = yesVotes >= 4;
+  const [yesVotesRaw, totalVotesRaw] = votesStr.split('/').map(Number);
+  const yesVotes = Number.isFinite(yesVotesRaw) ? yesVotesRaw : 0;
+  const totalVotes = Number.isFinite(totalVotesRaw) && totalVotesRaw > 0 ? totalVotesRaw : 5;
+  const threshold = Math.ceil(totalVotes * 0.8); // 80% YES required
+  const isApproved = yesVotes >= threshold;
 
-  // Get reasons from state
-  const reasons = state?.council_reasons || ['', '', '', '', ''];
+  // Get reasons from state (variable length)
+  const reasons = state?.council_reasons || [];
+  const aiNames = Array.from({ length: Math.max(reasons.length, totalVotes) }).map(
+    (_, i) => DEFAULT_AI_NAMES[i] || `AI ${i + 1}`,
+  );
 
   return (
     <div className="app-container">
@@ -46,7 +52,7 @@ export default function Council() {
 
       {/* AI Votes List */}
       <div style={{ marginBottom: '24px' }}>
-        {AI_NAMES.map((name, index) => {
+        {aiNames.map((name, index) => {
           const reason = reasons[index] || 'Awaiting analysis...';
           const isYes = reason.toLowerCase().includes('yes') || 
                         reason.toLowerCase().startsWith('buy') ||
@@ -86,7 +92,7 @@ export default function Council() {
       </p>
 
       <p style={{ color: 'hsl(var(--muted-foreground))' }}>
-        Trade only executes if 4/5 or 5/5 YES
+        Trade only executes if {threshold}/{totalVotes} or higher YES (≥80%)
       </p>
     </div>
   );

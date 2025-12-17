@@ -1,12 +1,16 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { useTraderState } from '@/hooks/useTraderState';
+import { supabase } from "@/integrations/supabase/client";
 
 export default function Dashboard() {
   const { user, loading: authLoading, signOut, initializeTraderState } = useAuth();
   const { state, trades, loading: stateLoading, toggleSwarm, toggleAutonomy } = useTraderState(user?.id || null);
   const navigate = useNavigate();
+  const [keyStatus, setKeyStatus] = useState<
+    null | { ok: boolean; alpacaOk?: boolean; krakenOk?: boolean; plaidOk?: boolean; openaiOk?: boolean }
+  >(null);
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -18,6 +22,30 @@ export default function Dashboard() {
     if (user) {
       initializeTraderState(user.id);
     }
+  }, [user, initializeTraderState]);
+
+  useEffect(() => {
+    (async () => {
+      if (!user) return;
+      try {
+        const { data, error } = await supabase.functions.invoke("bot-actions", {
+          body: { action: "status" },
+        });
+        if (error) {
+          setKeyStatus({ ok: false });
+          return;
+        }
+        setKeyStatus({
+          ok: true,
+          alpacaOk: Boolean(data?.alpacaOk),
+          krakenOk: Boolean(data?.krakenOk),
+          plaidOk: Boolean(data?.plaidOk),
+          openaiOk: Boolean(data?.openaiOk),
+        });
+      } catch {
+        setKeyStatus({ ok: false });
+      }
+    })();
   }, [user]);
 
   if (authLoading || stateLoading) {
@@ -63,6 +91,17 @@ export default function Dashboard() {
         Current Strategy: Predictive Swarm {state?.swarm_active ? 'Active' : 'Inactive'}
       </p>
 
+      <p className="medium-text" style={{ marginBottom: '16px' }}>
+        Bot backend: Supabase scheduled bot tick (24/7 once enabled)
+      </p>
+
+      {keyStatus && (
+        <p className="medium-text" style={{ marginBottom: '16px' }}>
+          Keys: Alpaca {keyStatus.alpacaOk ? "OK" : "Missing"} • Kraken {keyStatus.krakenOk ? "OK" : "Missing"} •
+          Plaid {keyStatus.plaidOk ? "OK" : "Missing"} • OpenAI {keyStatus.openaiOk ? "OK" : "Off"}
+        </p>
+      )}
+
       {/* Control Buttons */}
       <button
         className="plain-button"
@@ -97,6 +136,20 @@ export default function Dashboard() {
         onClick={() => navigate('/withdraw')}
       >
         Withdraw Money
+      </button>
+
+      <button
+        className="plain-button"
+        onClick={() => navigate('/bank')}
+      >
+        Banking (Plaid)
+      </button>
+
+      <button
+        className="plain-button"
+        onClick={() => navigate('/settings')}
+      >
+        Settings
       </button>
 
       {/* Recent Trades */}

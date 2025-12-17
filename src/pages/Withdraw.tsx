@@ -4,16 +4,27 @@ import { useAuth } from '@/hooks/useAuth';
 import { useTraderState } from '@/hooks/useTraderState';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/hooks/use-toast';
+import { getBotApiBaseUrl, getKrakenWithdrawAsset, getKrakenWithdrawKeyUsd, getSupabaseAccessToken } from "@/lib/botApi";
 
 export default function Withdraw() {
   const { user, loading: authLoading } = useAuth();
   const { state, loading: stateLoading } = useTraderState(user?.id || null);
   const navigate = useNavigate();
+  const botApiBase = getBotApiBaseUrl();
   
   const [amount, setAmount] = useState('');
   const [withdrawType, setWithdrawType] = useState('bank');
   const [submitting, setSubmitting] = useState(false);
-  const [withdrawals, setWithdrawals] = useState<any[]>([]);
+  const [withdrawals, setWithdrawals] = useState<WithdrawalRequest[]>([]);
+  const [krakenKey, setKrakenKey] = useState("");
+  const [krakenAsset, setKrakenAsset] = useState("ZUSD");
+
+  interface WithdrawalRequest {
+    id: string;
+    amount: number;
+    status: string;
+    created_at: string;
+  }
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -38,6 +49,122 @@ export default function Withdraw() {
 
     fetchWithdrawals();
   }, [user]);
+
+  useEffect(() => {
+    setKrakenKey(getKrakenWithdrawKeyUsd());
+    setKrakenAsset(getKrakenWithdrawAsset());
+  }, []);
+
+  const getAccessToken = async () => getSupabaseAccessToken();
+
+  const handleSellToCash = async () => {
+    if (!botApiBase) {
+      toast({
+        title: "Backend not configured",
+        description: "Set VITE_BOT_API_URL so the app can reach your bot service.",
+        variant: "destructive",
+      });
+      return;
+    }
+    const token = await getAccessToken();
+    if (!token) return;
+
+    setSubmitting(true);
+    try {
+      const r = await fetch(`${botApiBase}/actions/sell_to_cash`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await r.json();
+      if (!r.ok) {
+        toast({ title: "Sell to cash failed", description: data?.error || "Unknown error", variant: "destructive" });
+      } else {
+        toast({ title: "Sell to cash started", description: "Check Recent Trades / broker for fills." });
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleWithdrawViaPlaid = async () => {
+    if (!botApiBase) {
+      toast({
+        title: "Backend not configured",
+        description: "Set VITE_BOT_API_URL so the app can reach your bot service.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const numAmount = parseFloat(amount);
+    if (isNaN(numAmount) || numAmount <= 0) {
+      toast({
+        title: 'Error',
+        description: 'Please enter a valid amount',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const token = await getAccessToken();
+    if (!token) return;
+
+    setSubmitting(true);
+    try {
+      const r = await fetch(`${botApiBase}/plaid/withdraw`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ amount: numAmount, destination: withdrawType }),
+      });
+      const data = await r.json();
+      if (!r.ok) {
+        toast({ title: "Withdrawal failed", description: data?.error || "Unknown error", variant: "destructive" });
+      } else {
+        toast({ title: "Withdrawal submitted", description: "If enabled, Plaid Transfer will process the payout." });
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleWithdrawViaKraken = async () => {
+    if (!botApiBase) {
+      toast({
+        title: "Backend not configured",
+        description: "Set Bot Backend URL in Settings.",
+        variant: "destructive",
+      });
+      return;
+    }
+    const numAmount = parseFloat(amount);
+    if (isNaN(numAmount) || numAmount <= 0) {
+      toast({ title: "Error", description: "Enter a valid amount", variant: "destructive" });
+      return;
+    }
+    if (!krakenKey.trim()) {
+      toast({ title: "Missing Kraken withdraw key", description: "Set it in Settings.", variant: "destructive" });
+      return;
+    }
+    const token = await getAccessToken();
+    if (!token) return;
+
+    setSubmitting(true);
+    try {
+      const r = await fetch(`${botApiBase}/kraken/withdraw_fiat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ amount: numAmount, asset: krakenAsset, key: krakenKey }),
+      });
+      const data = await r.json();
+      if (!r.ok) {
+        toast({ title: "Kraken withdraw failed", description: data?.error || "Unknown error", variant: "destructive" });
+      } else {
+        toast({ title: "Kraken withdraw submitted", description: "Check Kraken withdraw status." });
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   const handleWithdraw = async () => {
     if (!user) return;
@@ -162,6 +289,33 @@ export default function Withdraw() {
           <option value="convert">Convert Crypto to USD first</option>
         </select>
       </div>
+
+      <button
+        className="plain-button"
+        onClick={handleSellToCash}
+        disabled={submitting}
+        style={{ marginBottom: '8px', fontWeight: '600' }}
+      >
+        {submitting ? 'Please wait...' : 'Sell All Positions to Cash'}
+      </button>
+
+      <button
+        className="plain-button"
+        onClick={handleWithdrawViaPlaid}
+        disabled={submitting}
+        style={{ marginBottom: '16px', fontWeight: '600' }}
+      >
+        {submitting ? 'Please wait...' : 'Withdraw via Plaid (if enabled)'}
+      </button>
+
+      <button
+        className="plain-button"
+        onClick={handleWithdrawViaKraken}
+        disabled={submitting}
+        style={{ marginBottom: '16px', fontWeight: '600' }}
+      >
+        {submitting ? 'Please wait...' : 'Withdraw USD via Kraken (if enabled)'}
+      </button>
 
       <button
         className="plain-button"
