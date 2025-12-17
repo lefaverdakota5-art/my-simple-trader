@@ -32,6 +32,12 @@ try:
 except ImportError:
     OpenAI = None  # type: ignore
 
+try:
+    from swarm_strategies import hybrid_council_vote, create_default_swarm
+except ImportError:
+    hybrid_council_vote = None  # type: ignore
+    create_default_swarm = None  # type: ignore
+
 app = FastAPI()
 
 
@@ -113,6 +119,10 @@ class Settings:
     openai_model: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
     openai_enabled: bool = _env_bool("OPENAI_ENABLED", False)
     swarm_ai_count: int = int(os.getenv("SWARM_AI_COUNT", "5"))
+    
+    # Swarm Strategies
+    swarm_strategy_mode: str = os.getenv("SWARM_STRATEGY_MODE", "hybrid").strip().lower()  # heuristic|traditional|openai|hybrid
+    use_swarm_strategies: bool = _env_bool("USE_SWARM_STRATEGIES", True)
 
 
 SETTINGS = Settings()
@@ -798,8 +808,27 @@ class UserBot:
                 "balance": cash,
             }
             
-            # Use OpenAI council if enabled and configured, otherwise use heuristic
-            if openai_enabled and openai_api_key:
+            # Choose voting strategy based on configuration
+            strategy_mode = self._settings.swarm_strategy_mode
+            
+            if strategy_mode == "hybrid" and self._settings.use_swarm_strategies and hybrid_council_vote:
+                # Use hybrid approach: traditional strategies + OpenAI
+                def openai_vote_func(data):
+                    if openai_enabled and openai_api_key:
+                        return _openai_council_vote(data, openai_api_key, openai_model, ai_count)
+                    return "0/0", [], False
+                
+                votes, reasons, approved = hybrid_council_vote(
+                    market_data,
+                    use_openai=openai_enabled and bool(openai_api_key),
+                    openai_func=openai_vote_func if (openai_enabled and openai_api_key) else None
+                )
+            elif strategy_mode == "traditional" and self._settings.use_swarm_strategies and create_default_swarm:
+                # Use only traditional strategies
+                manager = create_default_swarm()
+                votes, reasons, approved = manager.get_council_vote(market_data)
+            elif strategy_mode == "openai" and openai_enabled and openai_api_key:
+                # Use only OpenAI
                 votes, reasons, approved = _openai_council_vote(
                     market_data,
                     openai_api_key=openai_api_key,
@@ -807,6 +836,7 @@ class UserBot:
                     ai_count=ai_count,
                 )
             else:
+                # Fallback to heuristic approach
                 votes, reasons, approved = _council_vote_from_price_change(pct_change, self._orders_left())
             
             self._push.send_update(
