@@ -67,19 +67,76 @@ export default function Withdraw() {
       return;
     }
     const token = await getAccessToken();
-    if (!token) return;
+    if (!token) {
+      toast({
+        title: 'Authentication Error',
+        description: 'Please log in again',
+        variant: 'destructive',
+      });
+      return;
+    }
 
     setSubmitting(true);
     try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 15000);
+
       const r = await fetch(`${botApiBase}/actions/sell_to_cash`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
+        signal: controller.signal,
       });
-      const data = await r.json();
+
+      clearTimeout(timeout);
+
+      let data: any = {};
+      const text = await r.text();
+      
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch (parseError) {
+        console.error('Failed to parse response:', text);
+        toast({ 
+          title: "Invalid Response", 
+          description: "Server returned invalid data. Please try again.", 
+          variant: "destructive" 
+        });
+        return;
+      }
+
       if (!r.ok) {
-        toast({ title: "Sell to cash failed", description: data?.error || "Unknown error", variant: "destructive" });
+        toast({ 
+          title: "Sell to cash failed", 
+          description: data?.error || `Server error: ${r.status}`, 
+          variant: "destructive" 
+        });
       } else {
-        toast({ title: "Sell to cash started", description: "Check Recent Trades / broker for fills." });
+        toast({ 
+          title: "Sell to cash started", 
+          description: "Check Recent Trades / broker for fills." 
+        });
+      }
+    } catch (error: any) {
+      console.error('Sell to cash error:', error);
+      
+      if (error.name === 'AbortError') {
+        toast({ 
+          title: "Request Timeout", 
+          description: "The request took too long. Please check your connection and try again.", 
+          variant: "destructive" 
+        });
+      } else if (error.message?.includes('fetch')) {
+        toast({ 
+          title: "Network Error", 
+          description: "Could not reach the backend. Please check your connection.", 
+          variant: "destructive" 
+        });
+      } else {
+        toast({ 
+          title: "Error", 
+          description: error.message || "An unexpected error occurred", 
+          variant: "destructive" 
+        });
       }
     } finally {
       setSubmitting(false);
@@ -107,20 +164,78 @@ export default function Withdraw() {
     }
 
     const token = await getAccessToken();
-    if (!token) return;
+    if (!token) {
+      toast({
+        title: 'Authentication Error',
+        description: 'Please log in again',
+        variant: 'destructive',
+      });
+      return;
+    }
 
     setSubmitting(true);
     try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 15000); // 15 second timeout
+
       const r = await fetch(`${botApiBase}/plaid/withdraw`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ amount: numAmount, destination: withdrawType }),
+        signal: controller.signal,
       });
-      const data = await r.json();
+
+      clearTimeout(timeout);
+
+      let data: any = {};
+      const text = await r.text();
+      
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch (parseError) {
+        console.error('Failed to parse response:', text);
+        toast({ 
+          title: "Invalid Response", 
+          description: "Server returned invalid data. Please try again.", 
+          variant: "destructive" 
+        });
+        return;
+      }
+
       if (!r.ok) {
-        toast({ title: "Withdrawal failed", description: data?.error || "Unknown error", variant: "destructive" });
+        toast({ 
+          title: "Withdrawal failed", 
+          description: data?.error || `Server error: ${r.status}`, 
+          variant: "destructive" 
+        });
       } else {
-        toast({ title: "Withdrawal submitted", description: "If enabled, Plaid Transfer will process the payout." });
+        toast({ 
+          title: "Withdrawal submitted", 
+          description: "If enabled, Plaid Transfer will process the payout." 
+        });
+        setAmount(''); // Clear the amount field on success
+      }
+    } catch (error: any) {
+      console.error('Withdrawal error:', error);
+      
+      if (error.name === 'AbortError') {
+        toast({ 
+          title: "Request Timeout", 
+          description: "The request took too long. Please check your connection and try again.", 
+          variant: "destructive" 
+        });
+      } else if (error.message?.includes('fetch')) {
+        toast({ 
+          title: "Network Error", 
+          description: "Could not reach the backend. Please check your connection.", 
+          variant: "destructive" 
+        });
+      } else {
+        toast({ 
+          title: "Error", 
+          description: error.message || "An unexpected error occurred", 
+          variant: "destructive" 
+        });
       }
     } finally {
       setSubmitting(false);
@@ -146,20 +261,78 @@ export default function Withdraw() {
       return;
     }
     const token = await getAccessToken();
-    if (!token) return;
+    if (!token) {
+      toast({
+        title: 'Authentication Error',
+        description: 'Please log in again',
+        variant: 'destructive',
+      });
+      return;
+    }
 
     setSubmitting(true);
     try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 15000);
+
       const r = await fetch(`${botApiBase}/kraken/withdraw_fiat`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ amount: numAmount, asset: krakenAsset, key: krakenKey }),
+        signal: controller.signal,
       });
-      const data = await r.json();
+
+      clearTimeout(timeout);
+
+      let data: any = {};
+      const text = await r.text();
+      
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch (parseError) {
+        console.error('Failed to parse response:', text);
+        toast({ 
+          title: "Invalid Response", 
+          description: "Server returned invalid data. Please try again.", 
+          variant: "destructive" 
+        });
+        return;
+      }
+
       if (!r.ok) {
-        toast({ title: "Kraken withdraw failed", description: data?.error || "Unknown error", variant: "destructive" });
+        toast({ 
+          title: "Kraken withdraw failed", 
+          description: data?.error || `Server error: ${r.status}`, 
+          variant: "destructive" 
+        });
       } else {
-        toast({ title: "Kraken withdraw submitted", description: "Check Kraken withdraw status." });
+        toast({ 
+          title: "Kraken withdraw submitted", 
+          description: "Check Kraken withdraw status." 
+        });
+        setAmount(''); // Clear the amount field on success
+      }
+    } catch (error: any) {
+      console.error('Kraken withdrawal error:', error);
+      
+      if (error.name === 'AbortError') {
+        toast({ 
+          title: "Request Timeout", 
+          description: "The request took too long. Please check your connection and try again.", 
+          variant: "destructive" 
+        });
+      } else if (error.message?.includes('fetch')) {
+        toast({ 
+          title: "Network Error", 
+          description: "Could not reach the backend. Please check your connection.", 
+          variant: "destructive" 
+        });
+      } else {
+        toast({ 
+          title: "Error", 
+          description: error.message || "An unexpected error occurred", 
+          variant: "destructive" 
+        });
       }
     } finally {
       setSubmitting(false);
