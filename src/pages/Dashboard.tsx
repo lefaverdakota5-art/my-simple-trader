@@ -9,6 +9,7 @@ import { PerformanceChart } from "@/components/PerformanceChart";
 import { CryptoPriceTicker } from "@/components/CryptoPriceTicker";
 import { CryptoMarketGrid } from "@/components/CryptoMarketGrid";
 import { PositionsTracker } from "@/components/PositionsTracker";
+import { GoalTracker10M } from "@/components/GoalTracker10M";
 import { 
   TrendingUp, 
   TrendingDown, 
@@ -230,6 +231,15 @@ export default function Dashboard() {
             </p>
           </CardContent>
         </Card>
+      </div>
+
+      {/* $10M Goal Tracker */}
+      <div className="mb-6">
+        <GoalTracker10M 
+          portfolioValue={state?.portfolio_value || state?.balance || 0}
+          dailyProfit={state?.todays_profit || 0}
+          winRate={state?.win_rate || 0}
+        />
       </div>
 
       {/* Performance Chart */}
