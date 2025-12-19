@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { toast } from '@/hooks/use-toast';
 
 interface TraderState {
   id: string;
@@ -22,7 +23,11 @@ interface Trade {
   created_at: string;
 }
 
-export function useTraderState(userId: string | null) {
+interface UseTraderStateOptions {
+  showNotifications?: boolean;
+}
+
+export function useTraderState(userId: string | null, options: UseTraderStateOptions = { showNotifications: true }) {
   const [state, setState] = useState<TraderState | null>(null);
   const [trades, setTrades] = useState<Trade[]>([]);
   const [loading, setLoading] = useState(true);
@@ -102,7 +107,17 @@ export function useTraderState(userId: string | null) {
         (payload) => {
           console.log('New trade:', payload);
           if (payload.new) {
-            setTrades(prev => [payload.new as Trade, ...prev].slice(0, 50));
+            const newTrade = payload.new as Trade;
+            setTrades(prev => [newTrade, ...prev].slice(0, 50));
+            
+            // Show toast notification for new trades
+            if (options.showNotifications) {
+              toast({
+                title: "New Trade",
+                description: newTrade.message,
+                duration: 5000,
+              });
+            }
           }
         }
       )
@@ -112,7 +127,7 @@ export function useTraderState(userId: string | null) {
       supabase.removeChannel(stateChannel);
       supabase.removeChannel(tradesChannel);
     };
-  }, [userId]);
+  }, [userId, options.showNotifications]);
 
   const toggleSwarm = async () => {
     if (!userId || !state) return;
