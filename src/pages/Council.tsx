@@ -27,24 +27,34 @@ import {
 } from 'lucide-react';
 
 const AI_COUNCIL_CONFIG = [
+  // Core Analysts
   { name: 'Momentum Analyst', icon: TrendingUp, category: 'Core', color: 'text-blue-500' },
   { name: 'Risk Manager', icon: Shield, category: 'Core', color: 'text-red-500' },
   { name: 'Technical Analyst', icon: BarChart3, category: 'Core', color: 'text-purple-500' },
   { name: 'Volatility Guard', icon: Activity, category: 'Core', color: 'text-orange-500' },
   { name: 'Portfolio Guardian', icon: Target, category: 'Core', color: 'text-green-500' },
+  // AI Analysts (Lovable AI powered)
   { name: 'Top Trader Analyst', icon: Brain, category: 'AI', color: 'text-yellow-500' },
   { name: 'News Sentiment AI', icon: Newspaper, category: 'AI', color: 'text-cyan-500' },
   { name: 'Whale Tracker AI', icon: Anchor, category: 'AI', color: 'text-indigo-500' },
   { name: 'DeFi Protocol AI', icon: Layers, category: 'AI', color: 'text-pink-500' },
   { name: 'Contrarian Analyst', icon: RefreshCw, category: 'AI', color: 'text-amber-500' },
+  { name: 'Fear & Greed Index', icon: Heart, category: 'AI', color: 'text-red-400' },
+  { name: 'Macro Economist', icon: Globe, category: 'AI', color: 'text-blue-400' },
+  // Trading Bots
   { name: 'Grid Trading Bot', icon: Grid3X3, category: 'Bot', color: 'text-emerald-500' },
   { name: 'Scalping Bot', icon: Zap, category: 'Bot', color: 'text-rose-500' },
   { name: 'Mean Reversion Bot', icon: Activity, category: 'Bot', color: 'text-violet-500' },
-  { name: 'Fear & Greed Index', icon: Heart, category: 'AI', color: 'text-red-400' },
-  { name: 'Macro Economist', icon: Globe, category: 'AI', color: 'text-blue-400' },
   { name: 'DCA Bot', icon: DollarSign, category: 'Bot', color: 'text-green-400' },
   { name: 'Momentum Breakout', icon: Rocket, category: 'Bot', color: 'text-orange-400' },
-  { name: 'OpenAI Strategist', icon: Bot, category: 'Optional', color: 'text-teal-500' },
+  // Pro-Level AI (Gemini 2.5 Pro powered)
+  { name: 'Master Strategist', icon: Brain, category: 'Pro', color: 'text-gradient-to-r from-purple-500 to-pink-500' },
+  { name: 'AI Risk Assessor', icon: Shield, category: 'Pro', color: 'text-gradient-to-r from-red-500 to-orange-500' },
+  { name: 'Pattern Recognition', icon: BarChart3, category: 'Pro', color: 'text-gradient-to-r from-blue-500 to-cyan-500' },
+  // Real-time Search (Perplexity powered)
+  { name: 'Live News Search', icon: Globe, category: 'Search', color: 'text-teal-400' },
+  // Final Strategist
+  { name: 'AI Strategist', icon: Bot, category: 'AI', color: 'text-teal-500' },
 ];
 
 function getAiConfig(name: string) {

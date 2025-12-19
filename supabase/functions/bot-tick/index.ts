@@ -230,7 +230,83 @@ Respond with ONLY JSON: {"vote":"YES" or "NO","reason":"Pattern identified (max 
   });
 }
 
-// Top Trader Analyst - Uses Lovable AI to analyze what profitable traders would do
+// Perplexity Real-Time News Search - Gets live market news for sentiment
+async function perplexityNewsVote(opts: {
+  pct: number;
+  krakenPair: string;
+  symbol: string;
+  ordersLeft: boolean;
+}): Promise<{ vote: boolean; reason: string } | null> {
+  const PERPLEXITY_API_KEY = Deno.env.get("PERPLEXITY_API_KEY");
+  if (!PERPLEXITY_API_KEY) {
+    console.log("[perplexity-news] No PERPLEXITY_API_KEY configured");
+    return null;
+  }
+
+  try {
+    const controller = new AbortController();
+    const t = setTimeout(() => controller.abort(), 15000);
+
+    // Search for recent crypto news
+    const searchQuery = `${opts.symbol} ${opts.krakenPair.replace("USD", "")} crypto news today market sentiment`;
+    
+    const response = await fetch("https://api.perplexity.ai/chat/completions", {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        "Authorization": `Bearer ${PERPLEXITY_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "sonar",
+        messages: [
+          { role: "system", content: "You are a financial news analyst. Search for recent news and provide a trading recommendation. Respond with valid JSON only." },
+          { role: "user", content: `Search for the latest news about ${opts.symbol} and Bitcoin (${opts.krakenPair}). 
+          
+Based on today's news sentiment:
+- Price is currently ${opts.pct >= 0 ? "up" : "down"} ${Math.abs(opts.pct).toFixed(2)}%
+- Can we place orders: ${opts.ordersLeft ? "Yes" : "No"}
+
+Analyze the news sentiment and recommend: should we BUY now?
+Respond with ONLY JSON: {"vote":"YES" or "NO","reason":"Brief news-based reason (max 50 chars)"}` }
+        ],
+        search_recency_filter: "day", // Only last 24 hours
+      }),
+    });
+    clearTimeout(t);
+
+    if (!response.ok) {
+      console.log(`[perplexity-news] API error: ${response.status}`);
+      return null;
+    }
+
+    const data = await response.json();
+    const content = data?.choices?.[0]?.message?.content || "";
+    let jsonStr = content.trim();
+    
+    // Extract JSON from response
+    if (jsonStr.includes("```")) {
+      const match = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
+      if (match) jsonStr = match[1].trim();
+    }
+    // Try to find JSON object in text
+    const jsonMatch = jsonStr.match(/\{[\s\S]*?"vote"[\s\S]*?\}/);
+    if (jsonMatch) jsonStr = jsonMatch[0];
+
+    const parsed = JSON.parse(jsonStr) as { vote?: string; reason?: string };
+    if (!parsed?.vote) return null;
+
+    const vote = String(parsed.vote).toUpperCase() === "YES";
+    const reason = (parsed.reason || "Live news analysis").slice(0, 50);
+    console.log(`[perplexity-news] Vote: ${vote ? "YES" : "NO"}, Reason: ${reason}`);
+    return { vote, reason };
+  } catch (e) {
+    console.log(`[perplexity-news] Error: ${e instanceof Error ? e.message : "unknown"}`);
+    return null;
+  }
+}
+
+
 async function topTraderAnalystVote(opts: {
   pct: number;
   krakenPair: string;
@@ -817,7 +893,7 @@ serve(async (req) => {
       let totalMembers = 5;
       let yesVotes = Number(String(c.votes).split("/")[0] || "0");
 
-      // Run ALL AI analysts in parallel for maximum speed (uses Lovable AI - no user config needed)
+      // Run ALL AI analysts in parallel for maximum speed (uses Lovable AI + Perplexity - no user config needed)
       const aiContext = { pct, krakenPair, symbol: defaultSymbol, ordersLeft };
       const ohlcContext = { ...aiContext, ohlc };
       
@@ -838,6 +914,8 @@ serve(async (req) => {
         masterStrategistResult,
         riskAssessorResult,
         patternRecognitionResult,
+        // Real-time search (uses Perplexity for live news)
+        perplexityNewsResult,
       ] = await Promise.all([
         topTraderAnalystVote(aiContext),
         newsSentimentVote(aiContext),
@@ -855,6 +933,8 @@ serve(async (req) => {
         masterStrategistVote(ohlcContext),
         aiRiskAssessorVote(ohlcContext),
         patternRecognitionVote(ohlcContext),
+        // Real-time search
+        perplexityNewsVote(aiContext),
       ]);
 
       // Add all AI votes
@@ -875,6 +955,8 @@ serve(async (req) => {
         { result: masterStrategistResult, name: "Master Strategist (Pro)" },
         { result: riskAssessorResult, name: "AI Risk Assessor (Pro)" },
         { result: patternRecognitionResult, name: "Pattern Recognition AI" },
+        // Real-time search
+        { result: perplexityNewsResult, name: "Live News Search" },
       ];
 
       for (const { result, name } of aiVotes) {
