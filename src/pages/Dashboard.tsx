@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { PerformanceChart } from "@/components/PerformanceChart";
 import { CryptoPriceTicker } from "@/components/CryptoPriceTicker";
 import { CryptoMarketGrid } from "@/components/CryptoMarketGrid";
+import { PositionsTracker } from "@/components/PositionsTracker";
 import { 
   TrendingUp, 
   TrendingDown, 
@@ -242,6 +243,11 @@ export default function Dashboard() {
             win_rate: state.win_rate,
           } : null} 
         />
+      </div>
+
+      {/* Positions Tracker */}
+      <div className="mb-6">
+        <PositionsTracker userId={user?.id || null} />
       </div>
 
       {/* Crypto Market Grid */}

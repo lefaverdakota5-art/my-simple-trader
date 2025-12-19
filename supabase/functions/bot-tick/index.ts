@@ -769,13 +769,13 @@ async function krakenSign(path: string, nonce: string, postData: string, secret:
   return btoa(String.fromCharCode(...new Uint8Array(signature)));
 }
 
-// Place order on Kraken
+// Place BUY order on Kraken
 async function krakenPlaceOrder(opts: {
   krakenKey: string;
   krakenSecret: string;
   pair: string;
   volumeUsd: number;
-}): Promise<{ txid: string[] }> {
+}): Promise<{ txid: string[]; price: number; volume: number }> {
   const nonce = Date.now().toString();
   const path = "/0/private/AddOrder";
   
@@ -788,13 +788,14 @@ async function krakenPlaceOrder(opts: {
   if (!currentPrice) throw new Error("Could not fetch current price");
   
   // Calculate volume based on USD amount (minimum order varies by pair)
-  const volume = (opts.volumeUsd / currentPrice).toFixed(8);
+  const volume = opts.volumeUsd / currentPrice;
+  const volumeStr = volume.toFixed(8);
   
   const params = new URLSearchParams({
     nonce,
     ordertype: "market",
     type: "buy",
-    volume,
+    volume: volumeStr,
     pair: opts.pair,
   });
   const postData = params.toString();
@@ -817,7 +818,201 @@ async function krakenPlaceOrder(opts: {
     throw new Error(data.error.join(", "));
   }
   
-  return { txid: data.result?.txid || [] };
+  return { txid: data.result?.txid || [], price: currentPrice, volume };
+}
+
+// Place SELL order on Kraken
+async function krakenPlaceSellOrder(opts: {
+  krakenKey: string;
+  krakenSecret: string;
+  pair: string;
+  volume: number;
+}): Promise<{ txid: string[]; price: number }> {
+  const nonce = Date.now().toString();
+  const path = "/0/private/AddOrder";
+  
+  // Get current price
+  const tickerRes = await fetch(`https://api.kraken.com/0/public/Ticker?pair=${opts.pair}`);
+  const tickerData = await tickerRes.json() as { result?: Record<string, { c?: string[] }> };
+  const ticker = tickerData.result ? Object.values(tickerData.result)[0] : null;
+  const currentPrice = ticker?.c?.[0] ? Number(ticker.c[0]) : 0;
+  
+  if (!currentPrice) throw new Error("Could not fetch current price for sell");
+  
+  const params = new URLSearchParams({
+    nonce,
+    ordertype: "market",
+    type: "sell",
+    volume: opts.volume.toFixed(8),
+    pair: opts.pair,
+  });
+  const postData = params.toString();
+  
+  const signature = await krakenSign(path, nonce, postData, opts.krakenSecret);
+  
+  const response = await fetch(`https://api.kraken.com${path}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      "API-Key": opts.krakenKey,
+      "API-Sign": signature,
+    },
+    body: postData,
+  });
+  
+  const data = await response.json() as { error?: string[]; result?: { txid?: string[] } };
+  
+  if (data.error && data.error.length > 0) {
+    throw new Error(data.error.join(", "));
+  }
+  
+  console.log(`[bot-tick] Sell order placed: ${opts.volume} ${opts.pair} @ $${currentPrice}`);
+  
+  return { txid: data.result?.txid || [], price: currentPrice };
+}
+
+// Position type for tracking open trades
+interface Position {
+  id: string;
+  user_id: string;
+  symbol: string;
+  pair: string;
+  side: string;
+  quantity: number;
+  entry_price: number;
+  current_price?: number;
+  unrealized_pnl?: number;
+  unrealized_pnl_percent?: number;
+  take_profit_percent?: number;
+  stop_loss_percent?: number;
+  status: string;
+  entry_txid?: string;
+  exit_txid?: string;
+  exit_price?: number;
+  realized_pnl?: number;
+}
+
+// Check positions and execute take-profit/stop-loss
+async function checkAndClosePositions(opts: {
+  supabaseAdmin: any;
+  userId: string;
+  krakenKey: string;
+  krakenSecret: string;
+  allowLive: boolean;
+}): Promise<{ closed: number; messages: string[] }> {
+  const messages: string[] = [];
+  let closed = 0;
+
+  // Get open positions for user
+  const { data: positionsData, error } = await opts.supabaseAdmin
+    .from("positions")
+    .select("*")
+    .eq("user_id", opts.userId)
+    .eq("status", "open");
+
+  if (error || !positionsData || positionsData.length === 0) {
+    return { closed: 0, messages: [] };
+  }
+
+  const positions = positionsData as unknown as Position[];
+
+  for (const position of positions) {
+    try {
+      // Get current price
+      const tickerRes = await fetch(`https://api.kraken.com/0/public/Ticker?pair=${position.pair}`);
+      const tickerData = await tickerRes.json() as { result?: Record<string, { c?: string[] }> };
+      const ticker = tickerData.result ? Object.values(tickerData.result)[0] : null;
+      const currentPrice = ticker?.c?.[0] ? Number(ticker.c[0]) : 0;
+
+      if (!currentPrice) continue;
+
+      const entryPrice = Number(position.entry_price);
+      const quantity = Number(position.quantity);
+      const takeProfitPercent = Number(position.take_profit_percent || 10);
+      const stopLossPercent = Number(position.stop_loss_percent || 5);
+
+      // Calculate P&L
+      const pnlPercent = ((currentPrice - entryPrice) / entryPrice) * 100;
+      const unrealizedPnl = (currentPrice - entryPrice) * quantity;
+
+      // Update current price and unrealized P&L (using any to bypass type until schema syncs)
+      await (opts.supabaseAdmin
+        .from("positions") as any)
+        .update({
+          current_price: currentPrice,
+          unrealized_pnl: unrealizedPnl,
+          unrealized_pnl_percent: pnlPercent,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", position.id);
+
+      // Check take-profit condition
+      if (pnlPercent >= takeProfitPercent) {
+        if (opts.allowLive) {
+          const sellResult = await krakenPlaceSellOrder({
+            krakenKey: opts.krakenKey,
+            krakenSecret: opts.krakenSecret,
+            pair: position.pair,
+            volume: quantity,
+          });
+
+          const realizedPnl = (sellResult.price - entryPrice) * quantity;
+
+          await (opts.supabaseAdmin
+            .from("positions") as any)
+            .update({
+              status: "closed",
+              exit_price: sellResult.price,
+              exit_txid: sellResult.txid.join(","),
+              realized_pnl: realizedPnl,
+              closed_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", position.id);
+
+          messages.push(`🎯 TAKE PROFIT: Sold ${position.symbol} @ $${sellResult.price.toFixed(2)} (+${pnlPercent.toFixed(2)}%) • P&L: $${realizedPnl.toFixed(2)}`);
+          closed++;
+        } else {
+          messages.push(`📊 Take profit target hit for ${position.symbol} (+${pnlPercent.toFixed(2)}%) - live trading disabled`);
+        }
+      }
+      // Check stop-loss condition
+      else if (pnlPercent <= -stopLossPercent) {
+        if (opts.allowLive) {
+          const sellResult = await krakenPlaceSellOrder({
+            krakenKey: opts.krakenKey,
+            krakenSecret: opts.krakenSecret,
+            pair: position.pair,
+            volume: quantity,
+          });
+
+          const realizedPnl = (sellResult.price - entryPrice) * quantity;
+
+          await (opts.supabaseAdmin
+            .from("positions") as any)
+            .update({
+              status: "closed",
+              exit_price: sellResult.price,
+              exit_txid: sellResult.txid.join(","),
+              realized_pnl: realizedPnl,
+              closed_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", position.id);
+
+          messages.push(`🛑 STOP LOSS: Sold ${position.symbol} @ $${sellResult.price.toFixed(2)} (${pnlPercent.toFixed(2)}%) • P&L: $${realizedPnl.toFixed(2)}`);
+          closed++;
+        } else {
+          messages.push(`⚠️ Stop loss triggered for ${position.symbol} (${pnlPercent.toFixed(2)}%) - live trading disabled`);
+        }
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "position check failed";
+      messages.push(`Error checking ${position.symbol}: ${msg}`);
+    }
+  }
+
+  return { closed, messages };
 }
 
 serve(async (req) => {
@@ -1146,11 +1341,44 @@ serve(async (req) => {
       }
 
       try {
+        // First, check existing positions and execute take-profit/stop-loss
+        const positionCheckResult = await checkAndClosePositions({
+          supabaseAdmin,
+          userId,
+          krakenKey: String(keys?.kraken_key || ""),
+          krakenSecret: String(keys?.kraken_secret || ""),
+          allowLive,
+        });
+
+        // Log position check results
+        for (const msg of positionCheckResult.messages) {
+          await supabaseAdmin.rpc("update_trader_state_from_webhook", {
+            p_user_id: userId,
+            p_trade_message: msg,
+          });
+        }
+
+        // Now place the new buy order
         const orderResult = await krakenPlaceOrder({
           krakenKey: String(keys?.kraken_key || ""),
           krakenSecret: String(keys?.kraken_secret || ""),
           pair: krakenPair,
           volumeUsd: notionalUsd,
+        });
+
+        // Create position record for tracking
+        await (supabaseAdmin.from("positions") as any).insert({
+          user_id: userId,
+          symbol: bestPair.symbol,
+          pair: krakenPair,
+          side: "long",
+          quantity: orderResult.volume,
+          entry_price: orderResult.price,
+          current_price: orderResult.price,
+          take_profit_percent: 10, // Default 10% take profit
+          stop_loss_percent: 5,    // Default 5% stop loss
+          status: "open",
+          entry_txid: orderResult.txid.join(","),
         });
 
         await supabaseAdmin.from("user_bot_daily_stats").upsert(
@@ -1165,10 +1393,15 @@ serve(async (req) => {
 
         await supabaseAdmin.rpc("update_trader_state_from_webhook", {
           p_user_id: userId,
-          p_trade_message: `🚀 BOUGHT ${bestPair.symbol} (${krakenPair}) $${notionalUsd.toFixed(2)} • txid: ${orderResult.txid.join(",")}`,
+          p_trade_message: `🚀 BOUGHT ${bestPair.symbol} (${krakenPair}) ${orderResult.volume.toFixed(6)} @ $${orderResult.price.toFixed(2)} ($${notionalUsd.toFixed(2)}) • TP: 10% / SL: 5% • txid: ${orderResult.txid.join(",")}`,
         });
 
-        results.push({ user_id: userId, status: "traded", pair: bestPair.symbol });
+        results.push({ 
+          user_id: userId, 
+          status: "traded", 
+          pair: bestPair.symbol,
+          detail: `Bought + ${positionCheckResult.closed} positions closed`
+        });
       } catch (e) {
         const msg = e instanceof Error ? e.message : "order failed";
         results.push({ user_id: userId, status: "error", detail: msg });
