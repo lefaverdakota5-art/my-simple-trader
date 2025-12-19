@@ -12,6 +12,7 @@ const DEFAULT_AI_NAMES = [
   'Top Trader Analyst',
   'News Sentiment AI',
   'Whale Tracker AI',
+  'DeFi Protocol AI',
   'OpenAI Strategist',
 ];
 
@@ -110,22 +111,7 @@ export default function Council() {
       </p>
 
       <p style={{ color: 'hsl(var(--muted-foreground))', fontSize: '0.875rem', marginTop: '12px' }}>
-        Council: 5 core AIs + Top Trader Analyst + News Sentiment AI + Whale Tracker AI + OpenAI (if enabled)
-      </p>
-
-      {/* Council Vote Summary */}
-      <p 
-        className="big-text" 
-        style={{ 
-          color: isApproved ? 'hsl(var(--success))' : 'hsl(var(--destructive))',
-          marginBottom: '16px'
-        }}
-      >
-        Council Vote: {votesStr} YES
-      </p>
-
-      <p style={{ color: 'hsl(var(--muted-foreground))' }}>
-        Trade only executes if {threshold}/{totalVotes} or higher YES (≥80%)
+        Council: 5 core AIs + Top Trader Analyst + News Sentiment AI + Whale Tracker AI + DeFi Protocol AI + OpenAI (if enabled)
       </p>
     </div>
   );

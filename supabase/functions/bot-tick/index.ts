@@ -229,6 +229,71 @@ Respond with ONLY JSON: {"vote":"YES" or "NO","reason":"Brief whale analysis (ma
   }
 }
 
+// DeFi Protocol AI - Analyzes on-chain metrics and TVL data
+async function defiProtocolVote(opts: {
+  pct: number;
+  krakenPair: string;
+  symbol: string;
+  ordersLeft: boolean;
+}): Promise<{ vote: boolean; reason: string } | null> {
+  const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
+  if (!LOVABLE_API_KEY) return null;
+
+  try {
+    const controller = new AbortController();
+    const t = setTimeout(() => controller.abort(), 10000);
+
+    const prompt = `You are "DeFi Protocol AI" - an expert at analyzing on-chain metrics, Total Value Locked (TVL), protocol activity, and DeFi ecosystem health.
+
+Market Data:
+- Asset: ${opts.symbol} (Crypto: ${opts.krakenPair})
+- Today's price change: ${opts.pct.toFixed(2)}%
+- Can place orders: ${opts.ordersLeft ? "Yes" : "No"}
+
+On-chain and DeFi metrics to analyze:
+- Rising TVL typically indicates growing ecosystem confidence
+- High protocol activity suggests healthy demand
+- Stable or growing TVL during price dips = accumulation opportunity
+- Declining TVL with price drops = potential weakness
+- Cross-chain liquidity flows can signal market direction
+- DEX volume spikes often precede volatility
+- Lending protocol utilization rates indicate leverage sentiment
+
+Based on typical DeFi protocol patterns and on-chain metrics, should we BUY?
+Respond with ONLY JSON: {"vote":"YES" or "NO","reason":"Brief DeFi analysis (max 50 chars)"}`;
+
+    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      method: "POST",
+      signal: controller.signal,
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${LOVABLE_API_KEY}` },
+      body: JSON.stringify({
+        model: "google/gemini-2.5-flash",
+        messages: [
+          { role: "system", content: "You analyze DeFi protocols and on-chain metrics. Respond with valid JSON only." },
+          { role: "user", content: prompt },
+        ],
+        max_tokens: 80,
+      }),
+    });
+    clearTimeout(t);
+    if (!response.ok) return null;
+
+    const data = await response.json();
+    const content = data?.choices?.[0]?.message?.content || "";
+    let jsonStr = content.trim();
+    if (jsonStr.includes("```")) {
+      const match = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
+      if (match) jsonStr = match[1].trim();
+    }
+    const parsed = JSON.parse(jsonStr) as { vote?: string; reason?: string };
+    if (!parsed?.vote) return null;
+    return { vote: String(parsed.vote).toUpperCase() === "YES", reason: (parsed.reason || "").slice(0, 50) };
+  } catch (e) {
+    console.log(`[defi-protocol] Error: ${e instanceof Error ? e.message : "unknown"}`);
+    return null;
+  }
+}
+
 async function openaiVote(opts: {
   apiKey: string;
   model: string;
@@ -430,10 +495,11 @@ serve(async (req) => {
 
       // Run all AI analysts in parallel for speed (uses Lovable AI - no user config needed)
       const aiContext = { pct, krakenPair, symbol: defaultSymbol, ordersLeft };
-      const [topTraderVote, newsSentimentResult, whaleTrackerResult] = await Promise.all([
+      const [topTraderVote, newsSentimentResult, whaleTrackerResult, defiProtocolResult] = await Promise.all([
         topTraderAnalystVote(aiContext),
         newsSentimentVote(aiContext),
         whaleTrackerVote(aiContext),
+        defiProtocolVote(aiContext),
       ]);
 
       // Add Top Trader Analyst vote
@@ -455,6 +521,13 @@ serve(async (req) => {
         totalMembers++;
         if (whaleTrackerResult.vote) yesVotes++;
         c.reasons.push(`${whaleTrackerResult.vote ? "YES" : "NO"}: Whale Tracker AI • ${whaleTrackerResult.reason}`);
+      }
+
+      // Add DeFi Protocol AI vote
+      if (defiProtocolResult) {
+        totalMembers++;
+        if (defiProtocolResult.vote) yesVotes++;
+        c.reasons.push(`${defiProtocolResult.vote ? "YES" : "NO"}: DeFi Protocol AI • ${defiProtocolResult.reason}`);
       }
 
       // Optional OpenAI extra vote (9th member if enabled)
