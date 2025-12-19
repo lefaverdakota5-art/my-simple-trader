@@ -92,6 +92,7 @@ export type Database = {
           entry_txid: string | null
           exit_price: number | null
           exit_txid: string | null
+          high_water_mark: number | null
           id: string
           pair: string
           quantity: number
@@ -101,6 +102,8 @@ export type Database = {
           stop_loss_percent: number | null
           symbol: string
           take_profit_percent: number | null
+          trailing_stop_enabled: boolean | null
+          trailing_stop_price: number | null
           unrealized_pnl: number | null
           unrealized_pnl_percent: number | null
           updated_at: string
@@ -114,6 +117,7 @@ export type Database = {
           entry_txid?: string | null
           exit_price?: number | null
           exit_txid?: string | null
+          high_water_mark?: number | null
           id?: string
           pair: string
           quantity: number
@@ -123,6 +127,8 @@ export type Database = {
           stop_loss_percent?: number | null
           symbol: string
           take_profit_percent?: number | null
+          trailing_stop_enabled?: boolean | null
+          trailing_stop_price?: number | null
           unrealized_pnl?: number | null
           unrealized_pnl_percent?: number | null
           updated_at?: string
@@ -136,6 +142,7 @@ export type Database = {
           entry_txid?: string | null
           exit_price?: number | null
           exit_txid?: string | null
+          high_water_mark?: number | null
           id?: string
           pair?: string
           quantity?: number
@@ -145,6 +152,8 @@ export type Database = {
           stop_loss_percent?: number | null
           symbol?: string
           take_profit_percent?: number | null
+          trailing_stop_enabled?: boolean | null
+          trailing_stop_price?: number | null
           unrealized_pnl?: number | null
           unrealized_pnl_percent?: number | null
           updated_at?: string
@@ -262,6 +271,7 @@ export type Database = {
           plaid_client_id: string | null
           plaid_env: string | null
           plaid_secret: string | null
+          trailing_stop_percent: number | null
           updated_at: string
           user_id: string
         }
@@ -281,6 +291,7 @@ export type Database = {
           plaid_client_id?: string | null
           plaid_env?: string | null
           plaid_secret?: string | null
+          trailing_stop_percent?: number | null
           updated_at?: string
           user_id: string
         }
@@ -300,6 +311,7 @@ export type Database = {
           plaid_client_id?: string | null
           plaid_env?: string | null
           plaid_secret?: string | null
+          trailing_stop_percent?: number | null
           updated_at?: string
           user_id?: string
         }
