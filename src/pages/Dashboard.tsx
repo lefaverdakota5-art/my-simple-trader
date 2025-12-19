@@ -6,6 +6,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { PerformanceChart } from "@/components/PerformanceChart";
+import { CryptoPriceTicker } from "@/components/CryptoPriceTicker";
 import { 
   TrendingUp, 
   TrendingDown, 
@@ -109,6 +110,11 @@ export default function Dashboard() {
             <LogOut className="h-5 w-5" />
           </button>
         </div>
+      </div>
+
+      {/* Crypto Price Ticker */}
+      <div className="mb-6">
+        <CryptoPriceTicker />
       </div>
 
       {/* Bot Status Bar */}
