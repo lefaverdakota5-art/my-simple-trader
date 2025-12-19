@@ -1246,7 +1246,7 @@ serve(async (req) => {
       // pull keys
       const { data: keys, error: keysErr } = await supabaseAdmin
         .from("user_exchange_keys")
-        .select("kraken_key,kraken_secret,default_take_profit_percent,default_stop_loss_percent,trailing_stop_percent")
+        .select("kraken_key,kraken_secret,default_take_profit_percent,default_stop_loss_percent,trailing_stop_percent,max_position_percent")
         .eq("user_id", userId)
         .maybeSingle();
       if (keysErr) {
@@ -1391,11 +1391,30 @@ serve(async (req) => {
       }
 
       try {
-        // Get user's TP/SL settings
+        // Get user's TP/SL/Position sizing settings
         const userTakeProfitPercent = Number(keys?.default_take_profit_percent ?? 10);
         const userStopLossPercent = Number(keys?.default_stop_loss_percent ?? 5);
         const userTrailingStopPercent = keys?.trailing_stop_percent ? Number(keys.trailing_stop_percent) : null;
+        const userMaxPositionPercent = Number(keys?.max_position_percent ?? 10);
         const trailingEnabled = userTrailingStopPercent !== null && userTrailingStopPercent > 0;
+
+        // Get user's portfolio value to calculate position size
+        const { data: traderState } = await supabaseAdmin
+          .from("trader_state")
+          .select("portfolio_value,balance")
+          .eq("user_id", userId)
+          .maybeSingle();
+        
+        const portfolioValue = Number(traderState?.portfolio_value ?? traderState?.balance ?? 0);
+        
+        // Calculate max position size based on portfolio percentage
+        const maxPositionUsd = portfolioValue > 0 
+          ? Math.min(portfolioValue * (userMaxPositionPercent / 100), notionalUsd)
+          : notionalUsd;
+        
+        const actualOrderSize = Math.max(maxPositionUsd, 10); // Minimum $10 to avoid tiny orders
+        
+        console.log(`[bot-tick] Position sizing: Portfolio $${portfolioValue.toFixed(2)}, Max ${userMaxPositionPercent}% = $${maxPositionUsd.toFixed(2)}, Order: $${actualOrderSize.toFixed(2)}`);
 
         // First, check existing positions and execute take-profit/stop-loss/trailing-stop
         const positionCheckResult = await checkAndClosePositions({
@@ -1415,12 +1434,12 @@ serve(async (req) => {
           });
         }
 
-        // Now place the new buy order
+        // Now place the new buy order with position-sized amount
         const orderResult = await krakenPlaceOrder({
           krakenKey: String(keys?.kraken_key || ""),
           krakenSecret: String(keys?.kraken_secret || ""),
           pair: krakenPair,
-          volumeUsd: notionalUsd,
+          volumeUsd: actualOrderSize,
         });
 
         // Create position record for tracking with user's configured TP/SL and trailing stop
@@ -1452,9 +1471,10 @@ serve(async (req) => {
         );
 
         const trailInfo = trailingEnabled ? ` • Trail: ${userTrailingStopPercent}%` : "";
+        const positionInfo = portfolioValue > 0 ? ` (${userMaxPositionPercent}% of portfolio)` : "";
         await supabaseAdmin.rpc("update_trader_state_from_webhook", {
           p_user_id: userId,
-          p_trade_message: `🚀 BOUGHT ${bestPair.symbol} (${krakenPair}) ${orderResult.volume.toFixed(6)} @ $${orderResult.price.toFixed(2)} ($${notionalUsd.toFixed(2)}) • TP: ${userTakeProfitPercent}% / SL: ${userStopLossPercent}%${trailInfo} • txid: ${orderResult.txid.join(",")}`,
+          p_trade_message: `🚀 BOUGHT ${bestPair.symbol} (${krakenPair}) ${orderResult.volume.toFixed(6)} @ $${orderResult.price.toFixed(2)} ($${actualOrderSize.toFixed(2)}${positionInfo}) • TP: ${userTakeProfitPercent}% / SL: ${userStopLossPercent}%${trailInfo} • txid: ${orderResult.txid.join(",")}`,
         });
 
         results.push({ 

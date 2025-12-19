@@ -41,6 +41,7 @@ export default function Settings() {
   const [stopLossPercent, setStopLossPercent] = useState(5);
   const [trailingStopPercent, setTrailingStopPercent] = useState(3);
   const [trailingStopEnabled, setTrailingStopEnabled] = useState(false);
+  const [maxPositionPercent, setMaxPositionPercent] = useState(10);
   const [submitting, setSubmitting] = useState(false);
   const [submittingTpSl, setSubmittingTpSl] = useState(false);
   const [status, setStatus] = useState<{
@@ -50,6 +51,7 @@ export default function Settings() {
     takeProfitPercent?: number;
     stopLossPercent?: number;
     trailingStopPercent?: number;
+    maxPositionPercent?: number;
   } | null>(null);
   const [loadingStatus, setLoadingStatus] = useState(true);
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -86,6 +88,7 @@ export default function Settings() {
           if (data.takeProfitPercent != null) setTakeProfitPercent(data.takeProfitPercent);
           if (data.stopLossPercent != null) setStopLossPercent(data.stopLossPercent);
           if (data.trailingStopPercent != null) setTrailingStopPercent(data.trailingStopPercent);
+          if (data.maxPositionPercent != null) setMaxPositionPercent(data.maxPositionPercent);
         }
       } catch (e) {
         console.error("Failed to load status:", e);
@@ -164,14 +167,43 @@ export default function Settings() {
         )}
       </div>
 
-      {/* Take Profit / Stop Loss Settings */}
+      {/* Position Sizing & Risk Management */}
       <div style={{ marginBottom: "24px" }}>
         <h2 className="medium-text" style={{ fontWeight: 600, marginBottom: "12px" }}>
-          Auto Sell Settings
+          Risk Management
         </h2>
         <p style={{ color: "hsl(var(--muted-foreground))", fontSize: "0.9rem", marginBottom: "12px" }}>
-          Configure default take-profit and stop-loss percentages for new positions.
+          Configure position sizing and auto-sell rules to limit risk per trade.
         </p>
+        
+        {/* Max Position Size */}
+        <div style={{ 
+          padding: "16px", 
+          marginBottom: "16px",
+          background: "hsl(var(--muted) / 0.5)",
+          borderRadius: "8px",
+          border: "1px solid hsl(var(--border))"
+        }}>
+          <label style={{ display: "block", marginBottom: "8px", fontWeight: 600 }}>
+            Max Position Size (% of Portfolio)
+          </label>
+          <p style={{ color: "hsl(var(--muted-foreground))", fontSize: "0.85rem", marginBottom: "12px" }}>
+            Limits each trade to a maximum percentage of your portfolio value. Helps prevent over-concentration in a single position.
+          </p>
+          <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
+            <input
+              className="plain-input"
+              type="number"
+              min="1"
+              max="100"
+              step="1"
+              value={maxPositionPercent}
+              onChange={(e) => setMaxPositionPercent(parseFloat(e.target.value) || 10)}
+              style={{ width: "100px" }}
+            />
+            <span style={{ color: "hsl(var(--muted-foreground))" }}>% per trade</span>
+          </div>
+        </div>
         <div style={{ display: "flex", gap: "16px", flexWrap: "wrap", marginBottom: "12px" }}>
           <div style={{ flex: "1", minWidth: "140px" }}>
             <label style={{ display: "block", marginBottom: "4px", fontWeight: 500 }}>
@@ -260,6 +292,7 @@ export default function Settings() {
                   take_profit_percent: takeProfitPercent,
                   stop_loss_percent: stopLossPercent,
                   trailing_stop_percent: trailingStopEnabled ? trailingStopPercent : null,
+                  max_position_percent: maxPositionPercent,
                 },
               });
               if (error) {
