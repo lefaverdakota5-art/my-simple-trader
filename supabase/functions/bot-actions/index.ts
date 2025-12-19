@@ -66,7 +66,7 @@ serve(async (req) => {
     if (action === "status") {
       const { data, error } = await supabaseAdmin
         .from("user_exchange_keys")
-        .select("alpaca_api_key,alpaca_secret,kraken_key,kraken_secret,plaid_client_id,plaid_secret,plaid_env,openai_enabled,openai_model,openai_api_key")
+        .select("alpaca_api_key,alpaca_secret,kraken_key,kraken_secret,plaid_client_id,plaid_secret,plaid_env,openai_enabled,openai_model,openai_api_key,default_take_profit_percent,default_stop_loss_percent")
         .eq("user_id", userId)
         .maybeSingle();
 
@@ -83,7 +83,34 @@ serve(async (req) => {
         openaiOk,
         plaidEnv: data?.plaid_env ?? null,
         openaiModel: data?.openai_model ?? null,
+        takeProfitPercent: data?.default_take_profit_percent ?? 10,
+        stopLossPercent: data?.default_stop_loss_percent ?? 5,
       });
+    }
+
+    if (action === "set_tp_sl") {
+      const takeProfitPercent = Number(body?.take_profit_percent ?? 10);
+      const stopLossPercent = Number(body?.stop_loss_percent ?? 5);
+      
+      // Validate ranges
+      if (takeProfitPercent < 0.5 || takeProfitPercent > 100) {
+        return jsonResponse({ error: "Take profit must be between 0.5% and 100%" }, 400);
+      }
+      if (stopLossPercent < 0.5 || stopLossPercent > 100) {
+        return jsonResponse({ error: "Stop loss must be between 0.5% and 100%" }, 400);
+      }
+
+      const { error } = await supabaseAdmin
+        .from("user_exchange_keys")
+        .upsert({
+          user_id: userId,
+          default_take_profit_percent: takeProfitPercent,
+          default_stop_loss_percent: stopLossPercent,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: "user_id" });
+      
+      if (error) return jsonResponse({ error: error.message }, 500);
+      return jsonResponse({ success: true });
     }
 
     return jsonResponse({ error: "Unknown action" }, 400);

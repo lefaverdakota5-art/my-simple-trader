@@ -37,11 +37,16 @@ export default function Settings() {
   const [plaidClientId, setPlaidClientId] = useState("");
   const [plaidSecret, setPlaidSecret] = useState("");
   const [plaidEnv, setPlaidEnv] = useState("production");
+  const [takeProfitPercent, setTakeProfitPercent] = useState(10);
+  const [stopLossPercent, setStopLossPercent] = useState(5);
   const [submitting, setSubmitting] = useState(false);
+  const [submittingTpSl, setSubmittingTpSl] = useState(false);
   const [status, setStatus] = useState<{
     krakenOk?: boolean;
     plaidOk?: boolean;
     plaidEnv?: string;
+    takeProfitPercent?: number;
+    stopLossPercent?: number;
   } | null>(null);
   const [loadingStatus, setLoadingStatus] = useState(true);
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -75,6 +80,8 @@ export default function Settings() {
         if (!error && data?.success) {
           setStatus(data);
           if (data.plaidEnv) setPlaidEnv(data.plaidEnv);
+          if (data.takeProfitPercent != null) setTakeProfitPercent(data.takeProfitPercent);
+          if (data.stopLossPercent != null) setStopLossPercent(data.stopLossPercent);
         }
       } catch (e) {
         console.error("Failed to load status:", e);
@@ -151,6 +158,76 @@ export default function Settings() {
             />
           </div>
         )}
+      </div>
+
+      {/* Take Profit / Stop Loss Settings */}
+      <div style={{ marginBottom: "24px" }}>
+        <h2 className="medium-text" style={{ fontWeight: 600, marginBottom: "12px" }}>
+          Auto Sell Settings
+        </h2>
+        <p style={{ color: "hsl(var(--muted-foreground))", fontSize: "0.9rem", marginBottom: "12px" }}>
+          Configure default take-profit and stop-loss percentages for new positions.
+        </p>
+        <div style={{ display: "flex", gap: "16px", flexWrap: "wrap", marginBottom: "12px" }}>
+          <div style={{ flex: "1", minWidth: "140px" }}>
+            <label style={{ display: "block", marginBottom: "4px", fontWeight: 500 }}>
+              Take Profit %
+            </label>
+            <input
+              className="plain-input"
+              type="number"
+              min="1"
+              max="100"
+              step="0.5"
+              value={takeProfitPercent}
+              onChange={(e) => setTakeProfitPercent(parseFloat(e.target.value) || 10)}
+              style={{ width: "100%" }}
+            />
+          </div>
+          <div style={{ flex: "1", minWidth: "140px" }}>
+            <label style={{ display: "block", marginBottom: "4px", fontWeight: 500 }}>
+              Stop Loss %
+            </label>
+            <input
+              className="plain-input"
+              type="number"
+              min="1"
+              max="100"
+              step="0.5"
+              value={stopLossPercent}
+              onChange={(e) => setStopLossPercent(parseFloat(e.target.value) || 5)}
+              style={{ width: "100%" }}
+            />
+          </div>
+        </div>
+        <button
+          className="plain-button"
+          disabled={submittingTpSl}
+          onClick={async () => {
+            setSubmittingTpSl(true);
+            try {
+              const { data: resp, error } = await supabase.functions.invoke("bot-actions", {
+                body: {
+                  action: "set_tp_sl",
+                  take_profit_percent: takeProfitPercent,
+                  stop_loss_percent: stopLossPercent,
+                },
+              });
+              if (error) {
+                toast({ title: "Failed", description: error.message, variant: "destructive" });
+              } else if (resp?.error) {
+                toast({ title: "Failed", description: String(resp.error), variant: "destructive" });
+              } else {
+                toast({ title: "Saved", description: "Auto sell settings updated." });
+              }
+            } finally {
+              setSubmittingTpSl(false);
+            }
+          }}
+          style={{ fontWeight: 600 }}
+        >
+          {submittingTpSl ? "Saving..." : "Save Auto Sell Settings"}
+        </button>
       </div>
 
       <div style={{ marginBottom: "24px" }}>

@@ -251,6 +251,8 @@ export type Database = {
           alpaca_paper: boolean | null
           alpaca_secret: string | null
           created_at: string
+          default_stop_loss_percent: number | null
+          default_take_profit_percent: number | null
           id: string
           kraken_key: string | null
           kraken_secret: string | null
@@ -268,6 +270,8 @@ export type Database = {
           alpaca_paper?: boolean | null
           alpaca_secret?: string | null
           created_at?: string
+          default_stop_loss_percent?: number | null
+          default_take_profit_percent?: number | null
           id?: string
           kraken_key?: string | null
           kraken_secret?: string | null
@@ -285,6 +289,8 @@ export type Database = {
           alpaca_paper?: boolean | null
           alpaca_secret?: string | null
           created_at?: string
+          default_stop_loss_percent?: number | null
+          default_take_profit_percent?: number | null
           id?: string
           kraken_key?: string | null
           kraken_secret?: string | null

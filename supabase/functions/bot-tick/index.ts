@@ -1196,7 +1196,7 @@ serve(async (req) => {
       // pull keys
       const { data: keys, error: keysErr } = await supabaseAdmin
         .from("user_exchange_keys")
-        .select("kraken_key,kraken_secret")
+        .select("kraken_key,kraken_secret,default_take_profit_percent,default_stop_loss_percent")
         .eq("user_id", userId)
         .maybeSingle();
       if (keysErr) {
@@ -1341,6 +1341,10 @@ serve(async (req) => {
       }
 
       try {
+        // Get user's TP/SL settings
+        const userTakeProfitPercent = Number(keys?.default_take_profit_percent ?? 10);
+        const userStopLossPercent = Number(keys?.default_stop_loss_percent ?? 5);
+
         // First, check existing positions and execute take-profit/stop-loss
         const positionCheckResult = await checkAndClosePositions({
           supabaseAdmin,
@@ -1366,7 +1370,7 @@ serve(async (req) => {
           volumeUsd: notionalUsd,
         });
 
-        // Create position record for tracking
+        // Create position record for tracking with user's configured TP/SL
         await (supabaseAdmin.from("positions") as any).insert({
           user_id: userId,
           symbol: bestPair.symbol,
@@ -1375,8 +1379,8 @@ serve(async (req) => {
           quantity: orderResult.volume,
           entry_price: orderResult.price,
           current_price: orderResult.price,
-          take_profit_percent: 10, // Default 10% take profit
-          stop_loss_percent: 5,    // Default 5% stop loss
+          take_profit_percent: userTakeProfitPercent,
+          stop_loss_percent: userStopLossPercent,
           status: "open",
           entry_txid: orderResult.txid.join(","),
         });
@@ -1393,7 +1397,7 @@ serve(async (req) => {
 
         await supabaseAdmin.rpc("update_trader_state_from_webhook", {
           p_user_id: userId,
-          p_trade_message: `🚀 BOUGHT ${bestPair.symbol} (${krakenPair}) ${orderResult.volume.toFixed(6)} @ $${orderResult.price.toFixed(2)} ($${notionalUsd.toFixed(2)}) • TP: 10% / SL: 5% • txid: ${orderResult.txid.join(",")}`,
+          p_trade_message: `🚀 BOUGHT ${bestPair.symbol} (${krakenPair}) ${orderResult.volume.toFixed(6)} @ $${orderResult.price.toFixed(2)} ($${notionalUsd.toFixed(2)}) • TP: ${userTakeProfitPercent}% / SL: ${userStopLossPercent}% • txid: ${orderResult.txid.join(",")}`,
         });
 
         results.push({ 
