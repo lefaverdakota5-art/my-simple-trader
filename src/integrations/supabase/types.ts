@@ -83,6 +83,75 @@ export type Database = {
         }
         Relationships: []
       }
+      positions: {
+        Row: {
+          closed_at: string | null
+          created_at: string
+          current_price: number | null
+          entry_price: number
+          entry_txid: string | null
+          exit_price: number | null
+          exit_txid: string | null
+          id: string
+          pair: string
+          quantity: number
+          realized_pnl: number | null
+          side: string
+          status: string
+          stop_loss_percent: number | null
+          symbol: string
+          take_profit_percent: number | null
+          unrealized_pnl: number | null
+          unrealized_pnl_percent: number | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          closed_at?: string | null
+          created_at?: string
+          current_price?: number | null
+          entry_price: number
+          entry_txid?: string | null
+          exit_price?: number | null
+          exit_txid?: string | null
+          id?: string
+          pair: string
+          quantity: number
+          realized_pnl?: number | null
+          side?: string
+          status?: string
+          stop_loss_percent?: number | null
+          symbol: string
+          take_profit_percent?: number | null
+          unrealized_pnl?: number | null
+          unrealized_pnl_percent?: number | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          closed_at?: string | null
+          created_at?: string
+          current_price?: number | null
+          entry_price?: number
+          entry_txid?: string | null
+          exit_price?: number | null
+          exit_txid?: string | null
+          id?: string
+          pair?: string
+          quantity?: number
+          realized_pnl?: number | null
+          side?: string
+          status?: string
+          stop_loss_percent?: number | null
+          symbol?: string
+          take_profit_percent?: number | null
+          unrealized_pnl?: number | null
+          unrealized_pnl_percent?: number | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       trader_state: {
         Row: {
           autonomy_mode: boolean | null
