@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { PerformanceChart } from "@/components/PerformanceChart";
 import { CryptoPriceTicker } from "@/components/CryptoPriceTicker";
+import { CryptoMarketGrid } from "@/components/CryptoMarketGrid";
 import { 
   TrendingUp, 
   TrendingDown, 
@@ -241,6 +242,11 @@ export default function Dashboard() {
             win_rate: state.win_rate,
           } : null} 
         />
+      </div>
+
+      {/* Crypto Market Grid */}
+      <div className="mb-6">
+        <CryptoMarketGrid />
       </div>
 
       {/* Control Buttons */}
