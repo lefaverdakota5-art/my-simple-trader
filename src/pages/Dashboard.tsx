@@ -25,7 +25,7 @@ export default function Dashboard() {
   const { state, trades, loading: stateLoading, toggleSwarm, toggleAutonomy } = useTraderState(user?.id || null);
   const navigate = useNavigate();
   const [keyStatus, setKeyStatus] = useState<
-    null | { ok: boolean; alpacaOk?: boolean; krakenOk?: boolean; plaidOk?: boolean; openaiOk?: boolean }
+    null | { ok: boolean; krakenOk?: boolean; plaidOk?: boolean; openaiOk?: boolean }
   >(null);
 
   useEffect(() => {
@@ -53,7 +53,6 @@ export default function Dashboard() {
         }
         setKeyStatus({
           ok: true,
-          alpacaOk: Boolean(data?.alpacaOk),
           krakenOk: Boolean(data?.krakenOk),
           plaidOk: Boolean(data?.plaidOk),
           openaiOk: Boolean(data?.openaiOk),
@@ -123,9 +122,6 @@ export default function Dashboard() {
         </Badge>
         {keyStatus && (
           <>
-            <Badge variant={keyStatus.alpacaOk ? "default" : "outline"} className="text-sm">
-              Alpaca {keyStatus.alpacaOk ? "✓" : "✗"}
-            </Badge>
             <Badge variant={keyStatus.krakenOk ? "default" : "outline"} className="text-sm">
               Kraken {keyStatus.krakenOk ? "✓" : "✗"}
             </Badge>
