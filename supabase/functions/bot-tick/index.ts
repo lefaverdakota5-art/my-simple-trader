@@ -1818,36 +1818,35 @@ serve(async (req) => {
       }
 
       // Recalculate approval with all members
-      // Lower threshold for micro-scalp trades under $100 to increase trading frequency
-      const isMicroScalpTrade = notionalUsd < 100;
-      const isPennyOrMemeAsset = bestPair.symbol.includes("PEPE") || bestPair.symbol.includes("SHIB") || 
-                                  bestPair.symbol.includes("DOGE") || bestPair.symbol.includes("BONK") ||
-                                  bestPair.symbol.includes("FLOKI") || bestPair.symbol.includes("WIF");
-      const isHighVolatilityOpportunity = Math.abs(pct) > 3; // 3%+ move
+      // ULTRA-AGGRESSIVE: Maximum trading frequency for constant micro-gains
+      // Only need 25-35% approval to execute trades - prioritize volume over certainty
       
-      // Dynamic threshold: 50% for micro-scalps, 60% for penny stocks, 80% for standard trades
-      let thresholdPercent = 0.8; // Default conservative
-      let thresholdReason = "standard";
+      const isAnyPositiveSignal = yesVotes >= 2; // At least 2 yes votes
+      const hasAnyMomentum = Math.abs(pct) > 0.1; // Any movement > 0.1%
       
-      if (isMicroScalpTrade && isHighVolatilityOpportunity) {
-        thresholdPercent = 0.45; // Very aggressive for small volatile trades
-        thresholdReason = "micro-scalp+volatile";
-      } else if (isMicroScalpTrade) {
-        thresholdPercent = 0.50; // Aggressive for small trades
-        thresholdReason = "micro-scalp<$100";
-      } else if (isPennyOrMemeAsset) {
-        thresholdPercent = 0.55; // More aggressive for meme coins
-        thresholdReason = "penny/meme";
+      // Ultra-low thresholds for maximum trade execution
+      let thresholdPercent = 0.25; // Default: only 25% needed
+      let thresholdReason = "ultra-aggressive";
+      
+      if (notionalUsd < 50) {
+        thresholdPercent = 0.15; // Only 15% for tiny trades under $50
+        thresholdReason = "micro<$50";
+      } else if (notionalUsd < 100) {
+        thresholdPercent = 0.20; // 20% for trades under $100
+        thresholdReason = "micro<$100";
       } else if (notionalUsd < 250) {
-        thresholdPercent = 0.60; // Moderately aggressive for trades under $250
-        thresholdReason = "small-trade<$250";
+        thresholdPercent = 0.25; // 25% for trades under $250
+        thresholdReason = "small<$250";
       } else if (notionalUsd < 500) {
-        thresholdPercent = 0.70; // Slightly lower for medium trades
-        thresholdReason = "medium-trade<$500";
+        thresholdPercent = 0.30; // 30% for trades under $500
+        thresholdReason = "medium<$500";
+      } else {
+        thresholdPercent = 0.35; // 35% for larger trades
+        thresholdReason = "standard";
       }
       
-      const threshold = Math.ceil(totalMembers * thresholdPercent);
-      console.log(`[bot-tick] Threshold: ${(thresholdPercent * 100).toFixed(0)}% (${thresholdReason}) = ${threshold}/${totalMembers} votes needed, got ${yesVotes}`);
+      const threshold = Math.max(Math.ceil(totalMembers * thresholdPercent), 2); // Minimum 2 votes needed
+      console.log(`[bot-tick] ULTRA-AGGRESSIVE Threshold: ${(thresholdPercent * 100).toFixed(0)}% (${thresholdReason}) = ${threshold}/${totalMembers} votes needed, got ${yesVotes}`);
       
       c = {
         votes: `${yesVotes}/${totalMembers}`,
