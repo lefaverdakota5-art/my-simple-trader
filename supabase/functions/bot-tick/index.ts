@@ -376,43 +376,84 @@ Rules:
   }
 }
 
-async function alpacaPlaceOrder(opts: {
-  alpacaKey: string;
-  alpacaSecret: string;
-  paper: boolean;
-  symbol: string;
-  notionalUsd: number;
-}) {
-  const base = opts.paper ? "https://paper-api.alpaca.markets" : "https://api.alpaca.markets";
-  const r = await fetch(`${base}/v2/orders`, {
+// Kraken API signing helper
+async function krakenSign(path: string, nonce: string, postData: string, secret: string): Promise<string> {
+  const encoder = new TextEncoder();
+  
+  // SHA256 hash of nonce + postData
+  const sha256Data = encoder.encode(nonce + postData);
+  const sha256Hash = await crypto.subtle.digest("SHA-256", sha256Data);
+  
+  // Combine path + sha256 hash
+  const pathBytes = encoder.encode(path);
+  const combined = new Uint8Array(pathBytes.length + sha256Hash.byteLength);
+  combined.set(pathBytes, 0);
+  combined.set(new Uint8Array(sha256Hash), pathBytes.length);
+  
+  // HMAC-SHA512 with base64-decoded secret
+  const secretBytes = Uint8Array.from(atob(secret), c => c.charCodeAt(0));
+  const key = await crypto.subtle.importKey(
+    "raw",
+    secretBytes,
+    { name: "HMAC", hash: "SHA-512" },
+    false,
+    ["sign"]
+  );
+  const signature = await crypto.subtle.sign("HMAC", key, combined);
+  
+  // Return base64 encoded signature
+  return btoa(String.fromCharCode(...new Uint8Array(signature)));
+}
+
+// Place order on Kraken
+async function krakenPlaceOrder(opts: {
+  krakenKey: string;
+  krakenSecret: string;
+  pair: string;
+  volumeUsd: number;
+}): Promise<{ txid: string[] }> {
+  const nonce = Date.now().toString();
+  const path = "/0/private/AddOrder";
+  
+  // Get current price to calculate volume
+  const tickerRes = await fetch(`https://api.kraken.com/0/public/Ticker?pair=${opts.pair}`);
+  const tickerData = await tickerRes.json() as { result?: Record<string, { c?: string[] }> };
+  const ticker = tickerData.result ? Object.values(tickerData.result)[0] : null;
+  const currentPrice = ticker?.c?.[0] ? Number(ticker.c[0]) : 0;
+  
+  if (!currentPrice) throw new Error("Could not fetch current price");
+  
+  // Calculate volume based on USD amount (minimum order varies by pair)
+  const volume = (opts.volumeUsd / currentPrice).toFixed(8);
+  
+  const params = new URLSearchParams({
+    nonce,
+    ordertype: "market",
+    type: "buy",
+    volume,
+    pair: opts.pair,
+  });
+  const postData = params.toString();
+  
+  const signature = await krakenSign(path, nonce, postData, opts.krakenSecret);
+  
+  const response = await fetch(`https://api.kraken.com${path}`, {
     method: "POST",
     headers: {
-      "Content-Type": "application/json",
-      "APCA-API-KEY-ID": opts.alpacaKey,
-      "APCA-API-SECRET-KEY": opts.alpacaSecret,
+      "Content-Type": "application/x-www-form-urlencoded",
+      "API-Key": opts.krakenKey,
+      "API-Sign": signature,
     },
-    body: JSON.stringify({
-      symbol: opts.symbol,
-      notional: opts.notionalUsd.toFixed(2),
-      side: "buy",
-      type: "market",
-      time_in_force: "day",
-    }),
+    body: postData,
   });
-  const text = await r.text();
-  const data = (() => {
-    try {
-      return text ? JSON.parse(text) : {};
-    } catch {
-      return { raw: text };
-    }
-  })();
-  const message =
-    data && typeof data === "object" && "message" in data && typeof (data as { message?: unknown }).message === "string"
-      ? (data as { message: string }).message
-      : undefined;
-  if (!r.ok) throw new Error(message || `Alpaca order failed (${r.status})`);
-  return data;
+  
+  const data = await response.json() as { error?: string[]; result?: { txid?: string[] } };
+  
+  if (data.error && data.error.length > 0) {
+    throw new Error(data.error.join(", "));
+  }
+  
+  return { txid: data.result?.txid || [] };
 }
 
 serve(async (req) => {
@@ -459,23 +500,23 @@ serve(async (req) => {
       // pull keys
       const { data: keys, error: keysErr } = await supabaseAdmin
         .from("user_exchange_keys")
-        .select("alpaca_api_key,alpaca_secret,alpaca_paper,openai_enabled,openai_api_key,openai_model")
+        .select("kraken_key,kraken_secret,openai_enabled,openai_api_key,openai_model")
         .eq("user_id", userId)
         .maybeSingle();
       if (keysErr) {
         results.push({ user_id: userId, status: "error", detail: keysErr.message });
         continue;
       }
-      if (!keys?.alpaca_api_key || !keys?.alpaca_secret) {
+      if (!keys?.kraken_key || !keys?.kraken_secret) {
         // still update council so UI shows activity
         const c = council(pct, false);
         await supabaseAdmin.rpc("update_trader_state_from_webhook", {
           p_user_id: userId,
           p_council_votes: c.votes,
           p_council_reasons: c.reasons,
-          p_trade_message: `Bot tick: missing Alpaca keys`,
+          p_trade_message: `Bot tick: missing Kraken keys`,
         });
-        results.push({ user_id: userId, status: "skipped", detail: "missing Alpaca keys" });
+        results.push({ user_id: userId, status: "skipped", detail: "missing Kraken keys" });
         continue;
       }
 
@@ -565,20 +606,18 @@ serve(async (req) => {
         continue;
       }
 
-      // place tiny order (paper by default; live requires BOT_ALLOW_LIVE=true)
-      const paper = Boolean(keys.alpaca_paper);
-      if (!paper && !allowLive) {
-        results.push({ user_id: userId, status: "blocked", detail: "live disabled (set BOT_ALLOW_LIVE=true)" });
+      // place Kraken crypto order (requires BOT_ALLOW_LIVE=true for safety)
+      if (!allowLive) {
+        results.push({ user_id: userId, status: "blocked", detail: "live trading disabled (set BOT_ALLOW_LIVE=true)" });
         continue;
       }
 
       try {
-        await alpacaPlaceOrder({
-          alpacaKey: keys.alpaca_api_key,
-          alpacaSecret: keys.alpaca_secret,
-          paper,
-          symbol: defaultSymbol,
-          notionalUsd,
+        const orderResult = await krakenPlaceOrder({
+          krakenKey: keys.kraken_key,
+          krakenSecret: keys.kraken_secret,
+          pair: krakenPair,
+          volumeUsd: notionalUsd,
         });
 
         await supabaseAdmin.from("user_bot_daily_stats").upsert(
@@ -593,7 +632,7 @@ serve(async (req) => {
 
         await supabaseAdmin.rpc("update_trader_state_from_webhook", {
           p_user_id: userId,
-          p_trade_message: `Placed Alpaca BUY ${defaultSymbol} $${notionalUsd.toFixed(2)} (${paper ? "paper" : "live"})`,
+          p_trade_message: `Kraken BUY ${krakenPair} $${notionalUsd.toFixed(2)} • txid: ${orderResult.txid.join(",")}`,
         });
 
         results.push({ user_id: userId, status: "traded" });
@@ -602,7 +641,7 @@ serve(async (req) => {
         results.push({ user_id: userId, status: "error", detail: msg });
         await supabaseAdmin.rpc("update_trader_state_from_webhook", {
           p_user_id: userId,
-          p_trade_message: `Order error: ${msg}`,
+          p_trade_message: `Kraken order error: ${msg}`,
         });
       }
     }
