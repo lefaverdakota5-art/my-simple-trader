@@ -133,17 +133,24 @@ export default function Bank() {
     }
 
     // Fallback: Supabase edge function
-    const { data, error } = await supabase.functions.invoke("plaid", {
-      body: { action: "get_accounts" },
-    });
-    if (error) {
-      setErrorText(error.message);
-      toast({ title: "Plaid error", description: error.message, variant: "destructive" });
-      return;
+    try {
+      const { data, error } = await supabase.functions.invoke("plaid", {
+        body: { action: "get_accounts" },
+      });
+      if (error) {
+        const msg = `Edge function error: ${error.message}. Configure Bot Backend URL in Settings to bypass edge functions.`;
+        setErrorText(msg);
+        toast({ title: "Plaid error", description: msg, variant: "destructive" });
+        return;
+      }
+      setConnected(Boolean(data?.connected));
+      setInstitutionName(data?.institution_name ?? null);
+      setAccounts((data?.accounts ?? []) as PlaidAccount[]);
+    } catch (e) {
+      const msg = `Edge function failed: ${e instanceof Error ? e.message : "Unknown error"}. Configure Bot Backend URL in Settings.`;
+      setErrorText(msg);
+      toast({ title: "Edge function error", description: msg, variant: "destructive" });
     }
-    setConnected(Boolean(data?.connected));
-    setInstitutionName(data?.institution_name ?? null);
-    setAccounts((data?.accounts ?? []) as PlaidAccount[]);
   }, [botApiBase, getAccessToken, fetchJson]);
 
   const createLinkToken = useCallback(async () => {
@@ -176,15 +183,22 @@ export default function Bank() {
       return;
     }
 
-    const { data, error } = await supabase.functions.invoke("plaid", {
-      body: { action: "create_link_token" },
-    });
-    if (error) {
-      setErrorText(error.message);
-      toast({ title: "Plaid error", description: error.message, variant: "destructive" });
-      return;
+    try {
+      const { data, error } = await supabase.functions.invoke("plaid", {
+        body: { action: "create_link_token" },
+      });
+      if (error) {
+        const msg = `Edge function error: ${error.message}. Configure Bot Backend URL in Settings to bypass edge functions.`;
+        setErrorText(msg);
+        toast({ title: "Plaid error", description: msg, variant: "destructive" });
+        return;
+      }
+      setLinkToken(data?.link_token ?? null);
+    } catch (e) {
+      const msg = `Edge function failed: ${e instanceof Error ? e.message : "Unknown error"}. Configure Bot Backend URL in Settings.`;
+      setErrorText(msg);
+      toast({ title: "Edge function error", description: msg, variant: "destructive" });
     }
-    setLinkToken(data?.link_token ?? null);
   }, [botApiBase, getAccessToken, fetchJson]);
 
   const importFromSupabase = useCallback(async () => {
@@ -305,15 +319,19 @@ export default function Bank() {
             }
           }
         } else {
-          const resp = await supabase.functions.invoke("plaid", {
-            body: {
-              action: "exchange_public_token",
-              public_token,
-              institution_name: institutionName,
-              accounts,
-            },
-          });
-          error = resp.error ? { message: resp.error.message } : null;
+          try {
+            const resp = await supabase.functions.invoke("plaid", {
+              body: {
+                action: "exchange_public_token",
+                public_token,
+                institution_name: institutionName,
+                accounts,
+              },
+            });
+            error = resp.error ? { message: `Edge function error: ${resp.error.message}. Configure Bot Backend URL in Settings to bypass edge functions.` } : null;
+          } catch (e) {
+            error = { message: `Edge function failed: ${e instanceof Error ? e.message : "Unknown error"}. Configure Bot Backend URL in Settings.` };
+          }
         }
 
         if (error) {
@@ -365,6 +383,36 @@ export default function Bank() {
       <p className="medium-text" style={{ marginBottom: "16px" }}>
         Status: {connected ? `Connected${institutionName ? ` • ${institutionName}` : ""}` : "Not connected"}
       </p>
+
+      {!botApiBase && errorText && (
+        <div style={{ 
+          padding: "12px", 
+          marginBottom: "16px", 
+          backgroundColor: "hsl(var(--muted))", 
+          borderRadius: "8px",
+          border: "1px solid hsl(var(--border))"
+        }}>
+          <p style={{ fontWeight: 600, marginBottom: "8px", color: "hsl(var(--destructive))" }}>
+            ⚠️ Backend Not Configured
+          </p>
+          <p style={{ fontSize: "0.9rem", marginBottom: "8px" }}>
+            Plaid requires a backend server. Go to <strong>Settings</strong> and configure "Bot Backend URL" to use Plaid features.
+          </p>
+          <button 
+            className="plain-button" 
+            onClick={() => navigate("/settings")}
+            style={{ fontSize: "0.9rem", padding: "6px 12px" }}
+          >
+            Go to Settings
+          </button>
+        </div>
+      )}
+
+      {errorText && (
+        <p style={{ marginBottom: "16px", color: "hsl(var(--destructive))", fontSize: "0.9rem" }}>
+          {errorText}
+        </p>
+      )}
 
       <button className="plain-button" onClick={openPlaid} disabled={!linkToken || linkOpen}>
         {connected ? "Reconnect / Change Bank" : "Connect Bank"}
