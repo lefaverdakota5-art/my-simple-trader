@@ -3,6 +3,21 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { useTraderState } from '@/hooks/useTraderState';
 import { supabase } from "@/integrations/supabase/client";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { 
+  TrendingUp, 
+  TrendingDown, 
+  Wallet, 
+  Activity, 
+  Target, 
+  Award,
+  Settings,
+  LogOut,
+  Landmark,
+  Users,
+  ArrowDownCircle
+} from "lucide-react";
 
 export default function Dashboard() {
   const { user, loading: authLoading, signOut, initializeTraderState } = useAuth();
@@ -50,8 +65,11 @@ export default function Dashboard() {
 
   if (authLoading || stateLoading) {
     return (
-      <div className="app-container">
-        <p className="big-text">Loading...</p>
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-foreground mx-auto mb-4"></div>
+          <p className="text-muted-foreground">Loading dashboard...</p>
+        </div>
       </div>
     );
   }
@@ -68,117 +86,239 @@ export default function Dashboard() {
     navigate('/');
   };
 
+  const profitIsPositive = (state?.todays_profit || 0) >= 0;
+
   return (
-    <div className="app-container">
-      <h1 className="big-text" style={{ marginBottom: '24px' }}>My Trader</h1>
+    <div className="min-h-screen bg-background p-4 md:p-6 max-w-4xl mx-auto">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-2xl md:text-3xl font-bold">Trading Dashboard</h1>
+        <div className="flex gap-2">
+          <button
+            onClick={() => navigate('/settings')}
+            className="p-2 rounded-lg border border-border hover:bg-muted transition-colors"
+            title="Settings"
+          >
+            <Settings className="h-5 w-5" />
+          </button>
+          <button
+            onClick={handleLogout}
+            className="p-2 rounded-lg border border-border hover:bg-muted transition-colors"
+            title="Logout"
+          >
+            <LogOut className="h-5 w-5" />
+          </button>
+        </div>
+      </div>
 
-      {/* Balance Display */}
-      <p className="big-text">Total Balance: {formatMoney(state?.balance || 0)}</p>
-      
-      <p className="big-text" style={{ 
-        color: (state?.todays_profit || 0) >= 0 ? 'hsl(var(--success))' : 'hsl(var(--destructive))' 
-      }}>
-        Today's P/L: {formatMoney(state?.todays_profit || 0)}
-      </p>
-
-      <p className="big-text">Portfolio Value: {formatMoney(state?.portfolio_value || 0)}</p>
-      
-      <p className="big-text">Progress to $1M: {(state?.progress_percent || 0).toFixed(2)}%</p>
-      
-      <p className="big-text">Win Rate: {(state?.win_rate || 0).toFixed(1)}%</p>
-      
-      <p className="medium-text" style={{ marginTop: '16px', marginBottom: '24px' }}>
-        Current Strategy: Predictive Swarm {state?.swarm_active ? 'Active' : 'Inactive'}
-      </p>
-
-      <p className="medium-text" style={{ marginBottom: '16px' }}>
-        Bot backend: Supabase scheduled bot tick (24/7 once enabled)
-      </p>
-
-      {keyStatus && (
-        <p className="medium-text" style={{ marginBottom: '16px' }}>
-          Keys: Alpaca {keyStatus.alpacaOk ? "OK" : "Missing"} • Kraken {keyStatus.krakenOk ? "OK" : "Missing"} •
-          Plaid {keyStatus.plaidOk ? "OK" : "Missing"} • OpenAI {keyStatus.openaiOk ? "OK" : "Off"}
-        </p>
-      )}
-
-      {/* Control Buttons */}
-      <button
-        className="plain-button"
-        onClick={toggleSwarm}
-        style={{
-          color: state?.swarm_active ? 'hsl(var(--success))' : 'hsl(var(--destructive))',
-          fontWeight: '700',
-        }}
-      >
-        SWARM {state?.swarm_active ? 'ON' : 'OFF'}
-      </button>
-
-      <button
-        className="plain-button"
-        onClick={toggleAutonomy}
-        style={{
-          color: state?.autonomy_mode ? 'hsl(var(--success))' : 'hsl(var(--destructive))',
-        }}
-      >
-        Autonomy Mode {state?.autonomy_mode ? 'ON' : 'OFF'}
-      </button>
-
-      <button
-        className="plain-button"
-        onClick={() => navigate('/council')}
-      >
-        View AI Council
-      </button>
-
-      <button
-        className="plain-button"
-        onClick={() => navigate('/withdraw')}
-      >
-        Withdraw Money
-      </button>
-
-      <button
-        className="plain-button"
-        onClick={() => navigate('/bank')}
-      >
-        Banking (Plaid)
-      </button>
-
-      <button
-        className="plain-button"
-        onClick={() => navigate('/settings')}
-      >
-        Settings
-      </button>
-
-      {/* Recent Trades */}
-      <h2 className="medium-text" style={{ marginTop: '24px', fontWeight: '600' }}>
-        Recent Trades
-      </h2>
-      <div className="trade-list">
-        {trades.length === 0 ? (
-          <p style={{ color: 'hsl(var(--muted-foreground))' }}>No trades yet</p>
-        ) : (
-          trades.map((trade) => (
-            <div key={trade.id} className="trade-item">
-              {trade.message}
-              <span style={{ color: 'hsl(var(--muted-foreground))', marginLeft: '8px' }}>
-                {new Date(trade.created_at).toLocaleTimeString()}
-              </span>
-            </div>
-          ))
+      {/* Bot Status Bar */}
+      <div className="flex flex-wrap gap-2 mb-6">
+        <Badge variant={state?.swarm_active ? "default" : "secondary"} className="text-sm">
+          <Activity className="h-3 w-3 mr-1" />
+          Swarm {state?.swarm_active ? 'Active' : 'Inactive'}
+        </Badge>
+        <Badge variant={state?.autonomy_mode ? "default" : "secondary"} className="text-sm">
+          Autonomy {state?.autonomy_mode ? 'ON' : 'OFF'}
+        </Badge>
+        {keyStatus && (
+          <>
+            <Badge variant={keyStatus.alpacaOk ? "default" : "outline"} className="text-sm">
+              Alpaca {keyStatus.alpacaOk ? "✓" : "✗"}
+            </Badge>
+            <Badge variant={keyStatus.krakenOk ? "default" : "outline"} className="text-sm">
+              Kraken {keyStatus.krakenOk ? "✓" : "✗"}
+            </Badge>
+            <Badge variant={keyStatus.plaidOk ? "default" : "outline"} className="text-sm">
+              Plaid {keyStatus.plaidOk ? "✓" : "✗"}
+            </Badge>
+            <Badge variant={keyStatus.openaiOk ? "default" : "outline"} className="text-sm">
+              OpenAI {keyStatus.openaiOk ? "✓" : "○"}
+            </Badge>
+          </>
         )}
       </div>
 
-      {/* Logout */}
-      <button
-        className="plain-button"
-        onClick={handleLogout}
-        style={{ marginTop: '24px' }}
-      >
-        Logout
-      </button>
+      {/* Stats Grid */}
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+              <Wallet className="h-4 w-4" />
+              Balance
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-2xl font-bold">{formatMoney(state?.balance || 0)}</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+              {profitIsPositive ? (
+                <TrendingUp className="h-4 w-4 text-green-600" />
+              ) : (
+                <TrendingDown className="h-4 w-4 text-red-600" />
+              )}
+              Today's P/L
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className={`text-2xl font-bold ${profitIsPositive ? 'text-green-600' : 'text-red-600'}`}>
+              {profitIsPositive ? '+' : ''}{formatMoney(state?.todays_profit || 0)}
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+              <Activity className="h-4 w-4" />
+              Portfolio
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-2xl font-bold">{formatMoney(state?.portfolio_value || 0)}</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+              <Target className="h-4 w-4" />
+              Progress to $1M
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-2xl font-bold">{(state?.progress_percent || 0).toFixed(2)}%</p>
+            <div className="w-full bg-muted rounded-full h-2 mt-2">
+              <div 
+                className="bg-foreground rounded-full h-2 transition-all" 
+                style={{ width: `${Math.min(state?.progress_percent || 0, 100)}%` }}
+              />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+              <Award className="h-4 w-4" />
+              Win Rate
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-2xl font-bold">{(state?.win_rate || 0).toFixed(1)}%</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+              <Activity className="h-4 w-4" />
+              Last Update
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm font-medium">
+              {state?.updated_at ? new Date(state.updated_at).toLocaleTimeString() : 'Never'}
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Control Buttons */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+        <button
+          onClick={toggleSwarm}
+          className={`p-4 rounded-lg border-2 font-semibold transition-all ${
+            state?.swarm_active 
+              ? 'border-green-600 bg-green-50 text-green-700' 
+              : 'border-border bg-background hover:bg-muted'
+          }`}
+        >
+          <Activity className="h-5 w-5 mx-auto mb-1" />
+          Swarm {state?.swarm_active ? 'ON' : 'OFF'}
+        </button>
+
+        <button
+          onClick={toggleAutonomy}
+          className={`p-4 rounded-lg border-2 font-semibold transition-all ${
+            state?.autonomy_mode 
+              ? 'border-green-600 bg-green-50 text-green-700' 
+              : 'border-border bg-background hover:bg-muted'
+          }`}
+        >
+          <Target className="h-5 w-5 mx-auto mb-1" />
+          Autonomy {state?.autonomy_mode ? 'ON' : 'OFF'}
+        </button>
+
+        <button
+          onClick={() => navigate('/council')}
+          className="p-4 rounded-lg border-2 border-border bg-background hover:bg-muted font-semibold transition-all"
+        >
+          <Users className="h-5 w-5 mx-auto mb-1" />
+          AI Council
+        </button>
+
+        <button
+          onClick={() => navigate('/withdraw')}
+          className="p-4 rounded-lg border-2 border-border bg-background hover:bg-muted font-semibold transition-all"
+        >
+          <ArrowDownCircle className="h-5 w-5 mx-auto mb-1" />
+          Withdraw
+        </button>
+      </div>
+
+      {/* Additional Actions */}
+      <div className="grid grid-cols-2 gap-3 mb-6">
+        <button
+          onClick={() => navigate('/bank')}
+          className="p-4 rounded-lg border-2 border-border bg-background hover:bg-muted font-semibold transition-all"
+        >
+          <Landmark className="h-5 w-5 mx-auto mb-1" />
+          Banking (Plaid)
+        </button>
+
+        <button
+          onClick={() => navigate('/settings')}
+          className="p-4 rounded-lg border-2 border-border bg-background hover:bg-muted font-semibold transition-all"
+        >
+          <Settings className="h-5 w-5 mx-auto mb-1" />
+          Settings
+        </button>
+      </div>
+
+      {/* Recent Trades */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Activity className="h-5 w-5" />
+            Recent Trades
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="max-h-64 overflow-y-auto space-y-2">
+            {trades.length === 0 ? (
+              <p className="text-muted-foreground text-center py-8">
+                No trades yet. Enable the swarm to start trading.
+              </p>
+            ) : (
+              trades.map((trade) => (
+                <div 
+                  key={trade.id} 
+                  className="flex items-center justify-between p-3 bg-muted/50 rounded-lg"
+                >
+                  <span className="text-sm font-medium">{trade.message}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {new Date(trade.created_at).toLocaleString()}
+                  </span>
+                </div>
+              ))
+            )}
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }
