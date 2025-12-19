@@ -885,6 +885,9 @@ interface Position {
   unrealized_pnl_percent?: number;
   take_profit_percent?: number;
   stop_loss_percent?: number;
+  trailing_stop_enabled?: boolean;
+  high_water_mark?: number;
+  trailing_stop_price?: number;
   status: string;
   entry_txid?: string;
   exit_txid?: string;
@@ -892,13 +895,14 @@ interface Position {
   realized_pnl?: number;
 }
 
-// Check positions and execute take-profit/stop-loss
+// Check positions and execute take-profit/stop-loss/trailing-stop
 async function checkAndClosePositions(opts: {
   supabaseAdmin: any;
   userId: string;
   krakenKey: string;
   krakenSecret: string;
   allowLive: boolean;
+  trailingStopPercent?: number;
 }): Promise<{ closed: number; messages: string[] }> {
   const messages: string[] = [];
   let closed = 0;
@@ -930,18 +934,33 @@ async function checkAndClosePositions(opts: {
       const quantity = Number(position.quantity);
       const takeProfitPercent = Number(position.take_profit_percent || 10);
       const stopLossPercent = Number(position.stop_loss_percent || 5);
+      const trailingEnabled = position.trailing_stop_enabled || false;
+      const trailingPercent = opts.trailingStopPercent || 3;
 
       // Calculate P&L
       const pnlPercent = ((currentPrice - entryPrice) / entryPrice) * 100;
       const unrealizedPnl = (currentPrice - entryPrice) * quantity;
 
-      // Update current price and unrealized P&L (using any to bypass type until schema syncs)
+      // Trailing stop logic: update high water mark and trailing stop price
+      let highWaterMark = position.high_water_mark ? Number(position.high_water_mark) : entryPrice;
+      let trailingStopPrice = position.trailing_stop_price ? Number(position.trailing_stop_price) : null;
+
+      if (trailingEnabled && currentPrice > highWaterMark) {
+        // New high reached - update high water mark and trailing stop
+        highWaterMark = currentPrice;
+        trailingStopPrice = currentPrice * (1 - trailingPercent / 100);
+        console.log(`[${position.symbol}] New high: $${highWaterMark.toFixed(2)}, trailing stop: $${trailingStopPrice.toFixed(2)}`);
+      }
+
+      // Update current price, P&L, and trailing stop data
       await (opts.supabaseAdmin
         .from("positions") as any)
         .update({
           current_price: currentPrice,
           unrealized_pnl: unrealizedPnl,
           unrealized_pnl_percent: pnlPercent,
+          high_water_mark: highWaterMark,
+          trailing_stop_price: trailingStopPrice,
           updated_at: new Date().toISOString(),
         })
         .eq("id", position.id);
@@ -976,7 +995,38 @@ async function checkAndClosePositions(opts: {
           messages.push(`📊 Take profit target hit for ${position.symbol} (+${pnlPercent.toFixed(2)}%) - live trading disabled`);
         }
       }
-      // Check stop-loss condition
+      // Check trailing stop condition (triggers when price drops below trailing stop price)
+      else if (trailingEnabled && trailingStopPrice && currentPrice <= trailingStopPrice) {
+        const lockedInGain = ((trailingStopPrice - entryPrice) / entryPrice) * 100;
+        if (opts.allowLive) {
+          const sellResult = await krakenPlaceSellOrder({
+            krakenKey: opts.krakenKey,
+            krakenSecret: opts.krakenSecret,
+            pair: position.pair,
+            volume: quantity,
+          });
+
+          const realizedPnl = (sellResult.price - entryPrice) * quantity;
+
+          await (opts.supabaseAdmin
+            .from("positions") as any)
+            .update({
+              status: "closed",
+              exit_price: sellResult.price,
+              exit_txid: sellResult.txid.join(","),
+              realized_pnl: realizedPnl,
+              closed_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", position.id);
+
+          messages.push(`📈 TRAILING STOP: Sold ${position.symbol} @ $${sellResult.price.toFixed(2)} (peaked at $${highWaterMark.toFixed(2)}) • P&L: $${realizedPnl.toFixed(2)}`);
+          closed++;
+        } else {
+          messages.push(`📈 Trailing stop triggered for ${position.symbol} at $${currentPrice.toFixed(2)} (peak: $${highWaterMark.toFixed(2)}, locked: +${lockedInGain.toFixed(2)}%) - live trading disabled`);
+        }
+      }
+      // Check regular stop-loss condition
       else if (pnlPercent <= -stopLossPercent) {
         if (opts.allowLive) {
           const sellResult = await krakenPlaceSellOrder({
@@ -1196,7 +1246,7 @@ serve(async (req) => {
       // pull keys
       const { data: keys, error: keysErr } = await supabaseAdmin
         .from("user_exchange_keys")
-        .select("kraken_key,kraken_secret,default_take_profit_percent,default_stop_loss_percent")
+        .select("kraken_key,kraken_secret,default_take_profit_percent,default_stop_loss_percent,trailing_stop_percent")
         .eq("user_id", userId)
         .maybeSingle();
       if (keysErr) {
@@ -1344,14 +1394,17 @@ serve(async (req) => {
         // Get user's TP/SL settings
         const userTakeProfitPercent = Number(keys?.default_take_profit_percent ?? 10);
         const userStopLossPercent = Number(keys?.default_stop_loss_percent ?? 5);
+        const userTrailingStopPercent = keys?.trailing_stop_percent ? Number(keys.trailing_stop_percent) : null;
+        const trailingEnabled = userTrailingStopPercent !== null && userTrailingStopPercent > 0;
 
-        // First, check existing positions and execute take-profit/stop-loss
+        // First, check existing positions and execute take-profit/stop-loss/trailing-stop
         const positionCheckResult = await checkAndClosePositions({
           supabaseAdmin,
           userId,
           krakenKey: String(keys?.kraken_key || ""),
           krakenSecret: String(keys?.kraken_secret || ""),
           allowLive,
+          trailingStopPercent: userTrailingStopPercent || undefined,
         });
 
         // Log position check results
@@ -1370,7 +1423,7 @@ serve(async (req) => {
           volumeUsd: notionalUsd,
         });
 
-        // Create position record for tracking with user's configured TP/SL
+        // Create position record for tracking with user's configured TP/SL and trailing stop
         await (supabaseAdmin.from("positions") as any).insert({
           user_id: userId,
           symbol: bestPair.symbol,
@@ -1381,6 +1434,9 @@ serve(async (req) => {
           current_price: orderResult.price,
           take_profit_percent: userTakeProfitPercent,
           stop_loss_percent: userStopLossPercent,
+          trailing_stop_enabled: trailingEnabled,
+          high_water_mark: orderResult.price,
+          trailing_stop_price: trailingEnabled ? orderResult.price * (1 - (userTrailingStopPercent || 3) / 100) : null,
           status: "open",
           entry_txid: orderResult.txid.join(","),
         });
@@ -1395,9 +1451,10 @@ serve(async (req) => {
           { onConflict: "user_id,day" },
         );
 
+        const trailInfo = trailingEnabled ? ` • Trail: ${userTrailingStopPercent}%` : "";
         await supabaseAdmin.rpc("update_trader_state_from_webhook", {
           p_user_id: userId,
-          p_trade_message: `🚀 BOUGHT ${bestPair.symbol} (${krakenPair}) ${orderResult.volume.toFixed(6)} @ $${orderResult.price.toFixed(2)} ($${notionalUsd.toFixed(2)}) • TP: ${userTakeProfitPercent}% / SL: ${userStopLossPercent}% • txid: ${orderResult.txid.join(",")}`,
+          p_trade_message: `🚀 BOUGHT ${bestPair.symbol} (${krakenPair}) ${orderResult.volume.toFixed(6)} @ $${orderResult.price.toFixed(2)} ($${notionalUsd.toFixed(2)}) • TP: ${userTakeProfitPercent}% / SL: ${userStopLossPercent}%${trailInfo} • txid: ${orderResult.txid.join(",")}`,
         });
 
         results.push({ 

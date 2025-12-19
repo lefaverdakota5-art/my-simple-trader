@@ -39,6 +39,8 @@ export default function Settings() {
   const [plaidEnv, setPlaidEnv] = useState("production");
   const [takeProfitPercent, setTakeProfitPercent] = useState(10);
   const [stopLossPercent, setStopLossPercent] = useState(5);
+  const [trailingStopPercent, setTrailingStopPercent] = useState(3);
+  const [trailingStopEnabled, setTrailingStopEnabled] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submittingTpSl, setSubmittingTpSl] = useState(false);
   const [status, setStatus] = useState<{
@@ -47,6 +49,7 @@ export default function Settings() {
     plaidEnv?: string;
     takeProfitPercent?: number;
     stopLossPercent?: number;
+    trailingStopPercent?: number;
   } | null>(null);
   const [loadingStatus, setLoadingStatus] = useState(true);
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -82,6 +85,7 @@ export default function Settings() {
           if (data.plaidEnv) setPlaidEnv(data.plaidEnv);
           if (data.takeProfitPercent != null) setTakeProfitPercent(data.takeProfitPercent);
           if (data.stopLossPercent != null) setStopLossPercent(data.stopLossPercent);
+          if (data.trailingStopPercent != null) setTrailingStopPercent(data.trailingStopPercent);
         }
       } catch (e) {
         console.error("Failed to load status:", e);
@@ -200,6 +204,50 @@ export default function Settings() {
             />
           </div>
         </div>
+
+        {/* Trailing Stop-Loss Section */}
+        <div style={{ 
+          marginTop: "16px",
+          padding: "16px", 
+          background: "hsl(var(--muted) / 0.5)",
+          borderRadius: "8px",
+          border: "1px solid hsl(var(--border))"
+        }}>
+          <div style={{ display: "flex", gap: "8px", alignItems: "center", marginBottom: "12px" }}>
+            <input
+              type="checkbox"
+              checked={trailingStopEnabled}
+              onChange={(e) => setTrailingStopEnabled(e.target.checked)}
+              style={{ width: "18px", height: "18px" }}
+            />
+            <span style={{ fontWeight: 500 }}>Enable Trailing Stop-Loss</span>
+          </div>
+          <p style={{ color: "hsl(var(--muted-foreground))", fontSize: "0.85rem", marginBottom: "12px" }}>
+            Trailing stop follows the price up and locks in profits. As the price rises, the stop-loss 
+            moves up to stay a fixed percentage below the highest price reached.
+          </p>
+          {trailingStopEnabled && (
+            <div style={{ maxWidth: "200px" }}>
+              <label style={{ display: "block", marginBottom: "4px", fontWeight: 500 }}>
+                Trail Distance %
+              </label>
+              <input
+                className="plain-input"
+                type="number"
+                min="0.5"
+                max="50"
+                step="0.5"
+                value={trailingStopPercent}
+                onChange={(e) => setTrailingStopPercent(parseFloat(e.target.value) || 3)}
+                style={{ width: "100%" }}
+              />
+              <p style={{ color: "hsl(var(--muted-foreground))", fontSize: "0.8rem", marginTop: "4px" }}>
+                Stop triggers when price drops this % from peak
+              </p>
+            </div>
+          )}
+        </div>
+
         <button
           className="plain-button"
           disabled={submittingTpSl}
@@ -211,6 +259,7 @@ export default function Settings() {
                   action: "set_tp_sl",
                   take_profit_percent: takeProfitPercent,
                   stop_loss_percent: stopLossPercent,
+                  trailing_stop_percent: trailingStopEnabled ? trailingStopPercent : null,
                 },
               });
               if (error) {
@@ -224,7 +273,7 @@ export default function Settings() {
               setSubmittingTpSl(false);
             }
           }}
-          style={{ fontWeight: 600 }}
+          style={{ fontWeight: 600, marginTop: "16px" }}
         >
           {submittingTpSl ? "Saving..." : "Save Auto Sell Settings"}
         </button>
