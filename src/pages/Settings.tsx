@@ -30,6 +30,15 @@ export default function Settings() {
   const [openaiApiKey, setOpenaiApiKey] = useState("");
   const [openaiModel, setOpenaiModel] = useState("gpt-4o-mini");
   const [submitting, setSubmitting] = useState(false);
+  const [status, setStatus] = useState<{
+    alpacaOk?: boolean;
+    krakenOk?: boolean;
+    plaidOk?: boolean;
+    openaiOk?: boolean;
+    plaidEnv?: string;
+    openaiModel?: string;
+  } | null>(null);
+  const [loadingStatus, setLoadingStatus] = useState(true);
 
   useEffect(() => {
     if (!authLoading && !user) navigate("/");
@@ -40,6 +49,30 @@ export default function Settings() {
     setKrakenWithdrawKey(getKrakenWithdrawKeyUsd());
     setKrakenWithdrawAssetState(getKrakenWithdrawAsset());
   }, []);
+
+  // Load current status from bot-actions
+  useEffect(() => {
+    async function loadStatus() {
+      if (!user) return;
+      setLoadingStatus(true);
+      try {
+        const { data, error } = await supabase.functions.invoke("bot-actions", {
+          body: { action: "status" },
+        });
+        if (!error && data?.success) {
+          setStatus(data);
+          if (data.plaidEnv) setPlaidEnv(data.plaidEnv);
+          if (data.openaiModel) setOpenaiModel(data.openaiModel);
+          if (data.openaiOk) setOpenaiEnabled(true);
+        }
+      } catch (e) {
+        console.error("Failed to load status:", e);
+      } finally {
+        setLoadingStatus(false);
+      }
+    }
+    loadStatus();
+  }, [user]);
 
   return (
     <div className="app-container">
@@ -84,6 +117,35 @@ export default function Settings() {
         <h2 className="medium-text" style={{ fontWeight: 600, marginBottom: "12px" }}>
           Trading API Keys (sent to your backend)
         </h2>
+        
+        {/* Status indicators */}
+        {loadingStatus ? (
+          <p style={{ color: "hsl(var(--muted-foreground))", marginBottom: "12px" }}>Loading status...</p>
+        ) : status && (
+          <div style={{ 
+            display: "flex", 
+            gap: "16px", 
+            flexWrap: "wrap",
+            marginBottom: "16px",
+            padding: "12px",
+            background: "hsl(var(--muted))",
+            borderRadius: "8px"
+          }}>
+            <span style={{ color: status.alpacaOk ? "hsl(142, 76%, 36%)" : "hsl(var(--muted-foreground))" }}>
+              {status.alpacaOk ? "✓" : "○"} Alpaca
+            </span>
+            <span style={{ color: status.krakenOk ? "hsl(142, 76%, 36%)" : "hsl(var(--muted-foreground))" }}>
+              {status.krakenOk ? "✓" : "○"} Kraken
+            </span>
+            <span style={{ color: status.plaidOk ? "hsl(142, 76%, 36%)" : "hsl(var(--muted-foreground))" }}>
+              {status.plaidOk ? "✓" : "○"} Plaid
+            </span>
+            <span style={{ color: status.openaiOk ? "hsl(142, 76%, 36%)" : "hsl(var(--muted-foreground))" }}>
+              {status.openaiOk ? "✓" : "○"} OpenAI
+            </span>
+          </div>
+        )}
+        
         <p style={{ color: "hsl(var(--muted-foreground))", fontSize: "0.9rem", marginBottom: "12px" }}>
           Enter or paste your API keys directly into the text fields below, then press “Send to Backend”. Keys are stored in Supabase for the bot.
         </p>
@@ -249,6 +311,11 @@ export default function Settings() {
                 setPlaidClientId("");
                 setPlaidSecret("");
                 setOpenaiApiKey("");
+                // Refresh status
+                const { data: statusData } = await supabase.functions.invoke("bot-actions", {
+                  body: { action: "status" },
+                });
+                if (statusData?.success) setStatus(statusData);
               }
             } finally {
               setSubmitting(false);
