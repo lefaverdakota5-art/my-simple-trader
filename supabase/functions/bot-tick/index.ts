@@ -1817,8 +1817,38 @@ serve(async (req) => {
         c.reasons.push(`${lovableVote.vote ? "YES" : "NO"}: AI Strategist • ${lovableVote.reason}`);
       }
 
-      // Recalculate approval with all members - 80% threshold for conservative trading
-      const threshold = Math.ceil(totalMembers * 0.8);
+      // Recalculate approval with all members
+      // Lower threshold for micro-scalp trades under $100 to increase trading frequency
+      const isMicroScalpTrade = notionalUsd < 100;
+      const isPennyOrMemeAsset = bestPair.symbol.includes("PEPE") || bestPair.symbol.includes("SHIB") || 
+                                  bestPair.symbol.includes("DOGE") || bestPair.symbol.includes("BONK") ||
+                                  bestPair.symbol.includes("FLOKI") || bestPair.symbol.includes("WIF");
+      const isHighVolatilityOpportunity = Math.abs(pct) > 3; // 3%+ move
+      
+      // Dynamic threshold: 50% for micro-scalps, 60% for penny stocks, 80% for standard trades
+      let thresholdPercent = 0.8; // Default conservative
+      let thresholdReason = "standard";
+      
+      if (isMicroScalpTrade && isHighVolatilityOpportunity) {
+        thresholdPercent = 0.45; // Very aggressive for small volatile trades
+        thresholdReason = "micro-scalp+volatile";
+      } else if (isMicroScalpTrade) {
+        thresholdPercent = 0.50; // Aggressive for small trades
+        thresholdReason = "micro-scalp<$100";
+      } else if (isPennyOrMemeAsset) {
+        thresholdPercent = 0.55; // More aggressive for meme coins
+        thresholdReason = "penny/meme";
+      } else if (notionalUsd < 250) {
+        thresholdPercent = 0.60; // Moderately aggressive for trades under $250
+        thresholdReason = "small-trade<$250";
+      } else if (notionalUsd < 500) {
+        thresholdPercent = 0.70; // Slightly lower for medium trades
+        thresholdReason = "medium-trade<$500";
+      }
+      
+      const threshold = Math.ceil(totalMembers * thresholdPercent);
+      console.log(`[bot-tick] Threshold: ${(thresholdPercent * 100).toFixed(0)}% (${thresholdReason}) = ${threshold}/${totalMembers} votes needed, got ${yesVotes}`);
+      
       c = {
         votes: `${yesVotes}/${totalMembers}`,
         reasons: c.reasons,
