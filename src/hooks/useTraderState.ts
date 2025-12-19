@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/hooks/use-toast';
+import { useNotificationSound } from '@/hooks/useNotificationSound';
 
 interface TraderState {
   id: string;
@@ -31,6 +32,7 @@ export function useTraderState(userId: string | null, options: UseTraderStateOpt
   const [state, setState] = useState<TraderState | null>(null);
   const [trades, setTrades] = useState<Trade[]>([]);
   const [loading, setLoading] = useState(true);
+  const { playNotificationSound } = useNotificationSound();
 
   useEffect(() => {
     if (!userId) {
@@ -112,6 +114,7 @@ export function useTraderState(userId: string | null, options: UseTraderStateOpt
             
             // Show toast notification for new trades
             if (options.showNotifications) {
+              playNotificationSound();
               toast({
                 title: "New Trade",
                 description: newTrade.message,
@@ -127,7 +130,7 @@ export function useTraderState(userId: string | null, options: UseTraderStateOpt
       supabase.removeChannel(stateChannel);
       supabase.removeChannel(tradesChannel);
     };
-  }, [userId, options.showNotifications]);
+  }, [userId, options.showNotifications, playNotificationSound]);
 
   const toggleSwarm = async () => {
     if (!userId || !state) return;
