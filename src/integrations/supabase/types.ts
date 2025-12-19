@@ -14,6 +14,75 @@ export type Database = {
   }
   public: {
     Tables: {
+      plaid_accounts: {
+        Row: {
+          account_id: string
+          created_at: string
+          id: string
+          is_primary: boolean | null
+          item_id: string
+          mask: string | null
+          name: string | null
+          subtype: string | null
+          type: string | null
+          user_id: string
+        }
+        Insert: {
+          account_id: string
+          created_at?: string
+          id?: string
+          is_primary?: boolean | null
+          item_id: string
+          mask?: string | null
+          name?: string | null
+          subtype?: string | null
+          type?: string | null
+          user_id: string
+        }
+        Update: {
+          account_id?: string
+          created_at?: string
+          id?: string
+          is_primary?: boolean | null
+          item_id?: string
+          mask?: string | null
+          name?: string | null
+          subtype?: string | null
+          type?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      plaid_items: {
+        Row: {
+          access_token: string
+          created_at: string
+          id: string
+          institution_name: string | null
+          item_id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          access_token: string
+          created_at?: string
+          id?: string
+          institution_name?: string | null
+          item_id: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          access_token?: string
+          created_at?: string
+          id?: string
+          institution_name?: string | null
+          item_id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       trader_state: {
         Row: {
           autonomy_mode: boolean | null
@@ -79,6 +148,60 @@ export type Database = {
           created_at?: string
           id?: string
           message?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      user_exchange_keys: {
+        Row: {
+          alpaca_api_key: string | null
+          alpaca_paper: boolean | null
+          alpaca_secret: string | null
+          created_at: string
+          id: string
+          kraken_key: string | null
+          kraken_secret: string | null
+          openai_api_key: string | null
+          openai_enabled: boolean | null
+          openai_model: string | null
+          plaid_client_id: string | null
+          plaid_env: string | null
+          plaid_secret: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          alpaca_api_key?: string | null
+          alpaca_paper?: boolean | null
+          alpaca_secret?: string | null
+          created_at?: string
+          id?: string
+          kraken_key?: string | null
+          kraken_secret?: string | null
+          openai_api_key?: string | null
+          openai_enabled?: boolean | null
+          openai_model?: string | null
+          plaid_client_id?: string | null
+          plaid_env?: string | null
+          plaid_secret?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          alpaca_api_key?: string | null
+          alpaca_paper?: boolean | null
+          alpaca_secret?: string | null
+          created_at?: string
+          id?: string
+          kraken_key?: string | null
+          kraken_secret?: string | null
+          openai_api_key?: string | null
+          openai_enabled?: boolean | null
+          openai_model?: string | null
+          plaid_client_id?: string | null
+          plaid_env?: string | null
+          plaid_secret?: string | null
+          updated_at?: string
           user_id?: string
         }
         Relationships: []
