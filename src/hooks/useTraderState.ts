@@ -114,7 +114,10 @@ export function useTraderState(userId: string | null, options: UseTraderStateOpt
             
             // Show toast notification for new trades
             if (options.showNotifications) {
-              playNotificationSound();
+              const soundEnabled = localStorage.getItem("notificationSoundEnabled") !== "false";
+              if (soundEnabled) {
+                playNotificationSound();
+              }
               toast({
                 title: "New Trade",
                 description: newTrade.message,
