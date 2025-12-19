@@ -73,34 +73,37 @@ function council(pct: number, ordersLeft: boolean) {
   return { votes: `${yes}/5`, reasons, approved: yes >= 4 };
 }
 
-// Generic AI vote helper
+// Generic AI vote helper - uses Lovable AI (no API key needed)
 async function lovableAiVote(opts: {
   name: string;
   systemPrompt: string;
   userPrompt: string;
+  model?: string; // Optional: use "google/gemini-2.5-pro" for deeper analysis
 }): Promise<{ vote: boolean; reason: string } | null> {
   const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
   if (!LOVABLE_API_KEY) return null;
 
   try {
     const controller = new AbortController();
-    const t = setTimeout(() => controller.abort(), 10000);
+    const t = setTimeout(() => controller.abort(), 12000);
 
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
       signal: controller.signal,
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${LOVABLE_API_KEY}` },
       body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
+        model: opts.model || "google/gemini-2.5-flash",
         messages: [
           { role: "system", content: opts.systemPrompt },
           { role: "user", content: opts.userPrompt },
         ],
-        max_tokens: 80,
       }),
     });
     clearTimeout(t);
-    if (!response.ok) return null;
+    if (!response.ok) {
+      console.log(`[${opts.name}] API error: ${response.status}`);
+      return null;
+    }
 
     const data = await response.json();
     const content = data?.choices?.[0]?.message?.content || "";
@@ -111,11 +114,120 @@ async function lovableAiVote(opts: {
     }
     const parsed = JSON.parse(jsonStr) as { vote?: string; reason?: string };
     if (!parsed?.vote) return null;
-    return { vote: String(parsed.vote).toUpperCase() === "YES", reason: (parsed.reason || "").slice(0, 50) };
+    const vote = String(parsed.vote).toUpperCase() === "YES";
+    const reason = (parsed.reason || `${opts.name} vote`).slice(0, 50);
+    console.log(`[${opts.name}] Vote: ${vote ? "YES" : "NO"}, Reason: ${reason}`);
+    return { vote, reason };
   } catch (e) {
     console.log(`[${opts.name}] Error: ${e instanceof Error ? e.message : "unknown"}`);
     return null;
   }
+}
+
+// Pro-level Master Strategist - uses advanced Gemini 2.5 Pro for deeper analysis
+async function masterStrategistVote(opts: {
+  pct: number;
+  krakenPair: string;
+  symbol: string;
+  ordersLeft: boolean;
+  ohlc: { high: number; low: number; volume: number };
+}): Promise<{ vote: boolean; reason: string } | null> {
+  const range = opts.ohlc.high > 0 && opts.ohlc.low > 0 
+    ? ((opts.ohlc.high - opts.ohlc.low) / opts.ohlc.low * 100).toFixed(2) 
+    : "unknown";
+
+  return lovableAiVote({
+    name: "master-strategist",
+    model: "google/gemini-2.5-pro", // Use Pro model for complex reasoning
+    systemPrompt: "You are an elite trading strategist combining technical, fundamental, and sentiment analysis. Respond with valid JSON only.",
+    userPrompt: `You are "Master Strategist" - an elite AI that synthesizes all trading methodologies.
+
+Market Data:
+- Asset: ${opts.symbol} (Crypto: ${opts.krakenPair})
+- Today's change: ${opts.pct.toFixed(2)}%
+- 24h Range: ${range}%
+- 24h High: $${opts.ohlc.high.toFixed(2)}
+- 24h Low: $${opts.ohlc.low.toFixed(2)}
+- Volume: ${opts.ohlc.volume.toFixed(2)}
+- Can place orders: ${opts.ordersLeft ? "Yes" : "No"}
+
+Consider ALL factors:
+- Technical: Support/resistance, momentum, volume
+- Sentiment: Fear/greed based on price action
+- Risk: Position sizing, volatility-adjusted entries
+- Timing: Is this an optimal entry point?
+
+Synthesize all factors. Should we BUY?
+Respond with ONLY JSON: {"vote":"YES" or "NO","reason":"Brief synthesis (max 50 chars)"}`,
+  });
+}
+
+// AI Risk Assessor - Pro model for comprehensive risk analysis
+async function aiRiskAssessorVote(opts: {
+  pct: number;
+  krakenPair: string;
+  symbol: string;
+  ordersLeft: boolean;
+  ohlc: { high: number; low: number; volume: number };
+}): Promise<{ vote: boolean; reason: string } | null> {
+  const volatility = opts.ohlc.high > 0 && opts.ohlc.low > 0 
+    ? ((opts.ohlc.high - opts.ohlc.low) / opts.ohlc.low * 100).toFixed(2) 
+    : "unknown";
+
+  return lovableAiVote({
+    name: "ai-risk-assessor",
+    model: "google/gemini-2.5-pro",
+    systemPrompt: "You are a quantitative risk analyst. Respond with valid JSON only.",
+    userPrompt: `You are "AI Risk Assessor" - a quantitative analyst focused on risk-adjusted returns.
+
+Market Data:
+- Asset: ${opts.symbol} (Crypto: ${opts.krakenPair})
+- Today's change: ${opts.pct.toFixed(2)}%
+- 24h Volatility: ${volatility}%
+- Volume: ${opts.ohlc.volume.toFixed(2)}
+- Orders left today: ${opts.ordersLeft ? "Yes" : "No"}
+
+Risk factors to evaluate:
+- Volatility risk: High volatility (>3%) = higher risk
+- Drawdown potential based on current price vs range
+- Liquidity risk from volume levels
+- Overtrading risk if many orders already placed
+
+Only vote YES if risk/reward is favorable.
+Respond with ONLY JSON: {"vote":"YES" or "NO","reason":"Risk assessment (max 50 chars)"}`,
+  });
+}
+
+// Pattern Recognition AI - uses vision-capable model concept
+async function patternRecognitionVote(opts: {
+  pct: number;
+  krakenPair: string;
+  symbol: string;
+  ordersLeft: boolean;
+  ohlc: { high: number; low: number; volume: number };
+}): Promise<{ vote: boolean; reason: string } | null> {
+  return lovableAiVote({
+    name: "pattern-recognition",
+    model: "google/gemini-2.5-flash",
+    systemPrompt: "You are a chart pattern recognition expert. Respond with valid JSON only.",
+    userPrompt: `You are "Pattern Recognition AI" - an expert at identifying chart patterns from price data.
+
+Price Action Data:
+- Asset: ${opts.symbol} (${opts.krakenPair})
+- Today's movement: ${opts.pct.toFixed(2)}%
+- 24h High: $${opts.ohlc.high.toFixed(2)}
+- 24h Low: $${opts.ohlc.low.toFixed(2)}
+- Volume: ${opts.ohlc.volume.toFixed(2)}
+
+Pattern indicators:
+- Strong up day (>2%) near highs = bullish continuation
+- Down day (-2% to -4%) near lows = potential reversal
+- Low volatility + low volume = consolidation (wait)
+- High volume + breakout = confirmation
+
+Identify the likely pattern and recommend: should we BUY?
+Respond with ONLY JSON: {"vote":"YES" or "NO","reason":"Pattern identified (max 50 chars)"}`,
+  });
 }
 
 // Top Trader Analyst - Uses Lovable AI to analyze what profitable traders would do
@@ -722,6 +834,10 @@ serve(async (req) => {
         macroEconomistResult,
         dcaBotResult,
         momentumBreakoutResult,
+        // Pro-level AI analysts (uses Gemini 2.5 Pro for deeper reasoning)
+        masterStrategistResult,
+        riskAssessorResult,
+        patternRecognitionResult,
       ] = await Promise.all([
         topTraderAnalystVote(aiContext),
         newsSentimentVote(aiContext),
@@ -735,6 +851,10 @@ serve(async (req) => {
         macroEconomistVote(aiContext),
         dcaBotVote(aiContext),
         momentumBreakoutVote(ohlcContext),
+        // Pro models
+        masterStrategistVote(ohlcContext),
+        aiRiskAssessorVote(ohlcContext),
+        patternRecognitionVote(ohlcContext),
       ]);
 
       // Add all AI votes
@@ -751,6 +871,10 @@ serve(async (req) => {
         { result: macroEconomistResult, name: "Macro Economist" },
         { result: dcaBotResult, name: "DCA Bot" },
         { result: momentumBreakoutResult, name: "Momentum Breakout" },
+        // Pro-level analysts
+        { result: masterStrategistResult, name: "Master Strategist (Pro)" },
+        { result: riskAssessorResult, name: "AI Risk Assessor (Pro)" },
+        { result: patternRecognitionResult, name: "Pattern Recognition AI" },
       ];
 
       for (const { result, name } of aiVotes) {
