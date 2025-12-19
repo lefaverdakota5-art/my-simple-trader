@@ -2,47 +2,59 @@ import { useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { TrendingUp, TrendingDown, RefreshCw } from "lucide-react";
 
-interface PriceData {
-  btc: { price: number; change24h: number } | null;
-  eth: { price: number; change24h: number } | null;
+interface CoinPrice {
+  price: number;
+  change24h: number;
 }
 
+interface PriceData {
+  btc: CoinPrice | null;
+  eth: CoinPrice | null;
+  xrp: CoinPrice | null;
+  sol: CoinPrice | null;
+  doge: CoinPrice | null;
+}
+
+const COIN_CONFIG = [
+  { key: "btc", label: "BTC", color: "text-orange-500", pairs: ["XXBTZUSD", "XBTUSD"] },
+  { key: "eth", label: "ETH", color: "text-blue-500", pairs: ["XETHZUSD", "ETHUSD"] },
+  { key: "xrp", label: "XRP", color: "text-slate-400", pairs: ["XXRPZUSD", "XRPUSD"] },
+  { key: "sol", label: "SOL", color: "text-purple-500", pairs: ["SOLUSD"] },
+  { key: "doge", label: "DOGE", color: "text-yellow-500", pairs: ["XDGUSD", "DOGEUSD"] },
+] as const;
+
 export function CryptoPriceTicker() {
-  const [prices, setPrices] = useState<PriceData>({ btc: null, eth: null });
+  const [prices, setPrices] = useState<PriceData>({ btc: null, eth: null, xrp: null, sol: null, doge: null });
   const [loading, setLoading] = useState(true);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
 
   const fetchPrices = async () => {
     try {
       const response = await fetch(
-        "https://api.kraken.com/0/public/Ticker?pair=XBTUSD,ETHUSD"
+        "https://api.kraken.com/0/public/Ticker?pair=XBTUSD,ETHUSD,XRPUSD,SOLUSD,DOGEUSD"
       );
       const data = await response.json();
 
       if (data.result) {
-        const btcData = data.result.XXBTZUSD || data.result.XBTUSD;
-        const ethData = data.result.XETHZUSD || data.result.ETHUSD;
-
-        setPrices({
-          btc: btcData
-            ? {
-                price: parseFloat(btcData.c[0]),
+        const newPrices: PriceData = { btc: null, eth: null, xrp: null, sol: null, doge: null };
+        
+        for (const coin of COIN_CONFIG) {
+          for (const pairName of coin.pairs) {
+            const pairData = data.result[pairName];
+            if (pairData) {
+              newPrices[coin.key] = {
+                price: parseFloat(pairData.c[0]),
                 change24h:
-                  ((parseFloat(btcData.c[0]) - parseFloat(btcData.o)) /
-                    parseFloat(btcData.o)) *
+                  ((parseFloat(pairData.c[0]) - parseFloat(pairData.o)) /
+                    parseFloat(pairData.o)) *
                   100,
-              }
-            : null,
-          eth: ethData
-            ? {
-                price: parseFloat(ethData.c[0]),
-                change24h:
-                  ((parseFloat(ethData.c[0]) - parseFloat(ethData.o)) /
-                    parseFloat(ethData.o)) *
-                  100,
-              }
-            : null,
-        });
+              };
+              break;
+            }
+          }
+        }
+        
+        setPrices(newPrices);
         setLastUpdate(new Date());
       }
     } catch (error) {
@@ -54,16 +66,24 @@ export function CryptoPriceTicker() {
 
   useEffect(() => {
     fetchPrices();
-    const interval = setInterval(fetchPrices, 30000); // Update every 30 seconds
+    const interval = setInterval(fetchPrices, 30000);
     return () => clearInterval(interval);
   }, []);
 
-  const formatPrice = (price: number) =>
-    new Intl.NumberFormat("en-US", {
+  const formatPrice = (price: number) => {
+    if (price < 1) {
+      return new Intl.NumberFormat("en-US", {
+        style: "currency",
+        currency: "USD",
+        minimumFractionDigits: 4,
+      }).format(price);
+    }
+    return new Intl.NumberFormat("en-US", {
       style: "currency",
       currency: "USD",
       minimumFractionDigits: 2,
     }).format(price);
+  };
 
   const formatChange = (change: number) => {
     const isPositive = change >= 0;
@@ -85,24 +105,21 @@ export function CryptoPriceTicker() {
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-3">
-      {prices.btc && (
-        <Badge variant="outline" className="flex items-center gap-2 py-1.5 px-3">
-          <span className="font-bold text-orange-500">BTC</span>
-          <span className="font-mono">{formatPrice(prices.btc.price)}</span>
-          {formatChange(prices.btc.change24h)}
-        </Badge>
-      )}
-      {prices.eth && (
-        <Badge variant="outline" className="flex items-center gap-2 py-1.5 px-3">
-          <span className="font-bold text-blue-500">ETH</span>
-          <span className="font-mono">{formatPrice(prices.eth.price)}</span>
-          {formatChange(prices.eth.change24h)}
-        </Badge>
-      )}
+    <div className="flex flex-wrap items-center gap-2">
+      {COIN_CONFIG.map((coin) => {
+        const priceData = prices[coin.key];
+        if (!priceData) return null;
+        return (
+          <Badge key={coin.key} variant="outline" className="flex items-center gap-2 py-1.5 px-3">
+            <span className={`font-bold ${coin.color}`}>{coin.label}</span>
+            <span className="font-mono text-xs">{formatPrice(priceData.price)}</span>
+            {formatChange(priceData.change24h)}
+          </Badge>
+        );
+      })}
       {lastUpdate && (
         <span className="text-xs text-muted-foreground">
-          Updated {lastUpdate.toLocaleTimeString()}
+          {lastUpdate.toLocaleTimeString()}
         </span>
       )}
     </div>
