@@ -840,15 +840,24 @@ serve(async (req) => {
 
     const supabaseAdmin = createClient(supabaseUrl, serviceKey);
     const allowLive = envBool("BOT_ALLOW_LIVE", false);
-    const defaultSymbol = (Deno.env.get("BOT_DEFAULT_SYMBOL") || "AAPL").toUpperCase();
-    const notionalUsd = Number(Deno.env.get("BOT_MAX_NOTIONAL_USD") || "1");
-    const maxOrdersPerDay = Number(Deno.env.get("BOT_MAX_ORDERS_PER_DAY") || "20");
-    const krakenPair = (Deno.env.get("BOT_KRAKEN_PAIR") || "XBTUSD").toUpperCase();
+    const defaultSymbol = (Deno.env.get("BOT_DEFAULT_SYMBOL") || "BTC").toUpperCase();
+    const notionalUsd = Number(Deno.env.get("BOT_MAX_NOTIONAL_USD") || "50"); // $50 per trade
+    const maxOrdersPerDay = Number(Deno.env.get("BOT_MAX_ORDERS_PER_DAY") || "100"); // More trades allowed
+    
+    // Multi-pair trading support - BTC, ETH, SOL, and more
+    const tradingPairs = [
+      { pair: "XBTUSD", symbol: "BTC", name: "Bitcoin" },
+      { pair: "ETHUSD", symbol: "ETH", name: "Ethereum" },
+      { pair: "SOLUSD", symbol: "SOL", name: "Solana" },
+      { pair: "ADAUSD", symbol: "ADA", name: "Cardano" },
+      { pair: "DOTUSD", symbol: "DOT", name: "Polkadot" },
+      { pair: "LINKUSD", symbol: "LINK", name: "Chainlink" },
+    ];
 
     // Find all active users
     const { data: active, error: activeErr } = await supabaseAdmin
       .from("trader_state")
-      .select("user_id,swarm_active")
+      .select("user_id,swarm_active,autonomy_mode")
       .eq("swarm_active", true);
     if (activeErr) return jsonResponse({ error: activeErr.message }, 500);
 
@@ -856,20 +865,41 @@ serve(async (req) => {
     if (!users.length) return jsonResponse({ success: true, processed: 0 });
 
     const today = new Date().toISOString().slice(0, 10);
+    const results: Array<{ user_id: string; status: string; pair?: string; detail?: string }> = [];
     
-    // Fetch market data
-    const [pct, ohlc] = await Promise.all([
-      krakenPctChange(krakenPair),
-      krakenOHLC(krakenPair),
-    ]);
+    // Track best opportunity across all pairs
+    let bestPair = tradingPairs[0];
+    let bestPct = 0;
+    let bestOhlc = { high: 0, low: 0, volume: 0 };
 
-    const results: Array<{ user_id: string; status: string; detail?: string }> = [];
+    // Fetch market data for all pairs in parallel
+    const pairDataPromises = tradingPairs.map(async (p) => {
+      const [pct, ohlc] = await Promise.all([
+        krakenPctChange(p.pair),
+        krakenOHLC(p.pair),
+      ]);
+      return { ...p, pct, ohlc };
+    });
+    const pairData = await Promise.all(pairDataPromises);
+    
+    // Find best trading opportunity (looking for dips or strong momentum)
+    for (const pd of pairData) {
+      // Prefer dips (negative), but also consider strong positive momentum
+      const score = pd.pct < 0 ? Math.abs(pd.pct) * 2 : pd.pct; // Weight dips higher
+      if (score > Math.abs(bestPct) || bestPct === 0) {
+        bestPair = pd;
+        bestPct = pd.pct;
+        bestOhlc = pd.ohlc;
+      }
+    }
+    
+    console.log(`[bot-tick] Best opportunity: ${bestPair.symbol} at ${bestPct.toFixed(2)}%`);
 
     for (const userId of users) {
       // pull keys
       const { data: keys, error: keysErr } = await supabaseAdmin
         .from("user_exchange_keys")
-        .select("kraken_key,kraken_secret,openai_enabled,openai_api_key,openai_model")
+        .select("kraken_key,kraken_secret")
         .eq("user_id", userId)
         .maybeSingle();
       if (keysErr) {
@@ -889,12 +919,17 @@ serve(async (req) => {
       const ordersCount = Number(stat?.orders_count || 0);
       const ordersLeft = ordersCount < maxOrdersPerDay;
 
+      // Use best pair for analysis
+      const krakenPair = bestPair.pair;
+      const pct = bestPct;
+      const ohlc = bestOhlc;
+
       let c = council(pct, ordersLeft);
       let totalMembers = 5;
       let yesVotes = Number(String(c.votes).split("/")[0] || "0");
 
       // Run ALL AI analysts in parallel for maximum speed (uses Lovable AI + Perplexity - no user config needed)
-      const aiContext = { pct, krakenPair, symbol: defaultSymbol, ordersLeft };
+      const aiContext = { pct, krakenPair, symbol: bestPair.symbol, ordersLeft };
       const ohlcContext = { ...aiContext, ohlc };
       
       const [
@@ -975,8 +1010,8 @@ serve(async (req) => {
         c.reasons.push(`${lovableVote.vote ? "YES" : "NO"}: AI Strategist • ${lovableVote.reason}`);
       }
 
-      // Recalculate approval with all members
-      const threshold = Math.ceil(totalMembers * 0.8); // 80% yes required
+      // Recalculate approval with all members - 80% threshold for conservative trading
+      const threshold = Math.ceil(totalMembers * 0.8);
       c = {
         votes: `${yesVotes}/${totalMembers}`,
         reasons: c.reasons,
@@ -988,11 +1023,11 @@ serve(async (req) => {
         p_user_id: userId,
         p_council_votes: c.votes,
         p_council_reasons: c.reasons,
-        p_trade_message: `Bot tick: ${krakenPair} ${pct.toFixed(2)}% • ${c.votes} council vote`,
+        p_trade_message: `Bot tick: ${bestPair.symbol} (${krakenPair}) ${pct.toFixed(2)}% • ${c.votes} council vote`,
       });
 
       if (!c.approved || !ordersLeft) {
-        results.push({ user_id: userId, status: "no_trade" });
+        results.push({ user_id: userId, status: "no_trade", pair: bestPair.symbol });
         continue;
       }
 
@@ -1028,10 +1063,10 @@ serve(async (req) => {
 
         await supabaseAdmin.rpc("update_trader_state_from_webhook", {
           p_user_id: userId,
-          p_trade_message: `Kraken BUY ${krakenPair} $${notionalUsd.toFixed(2)} • txid: ${orderResult.txid.join(",")}`,
+          p_trade_message: `🚀 BOUGHT ${bestPair.symbol} (${krakenPair}) $${notionalUsd.toFixed(2)} • txid: ${orderResult.txid.join(",")}`,
         });
 
-        results.push({ user_id: userId, status: "traded" });
+        results.push({ user_id: userId, status: "traded", pair: bestPair.symbol });
       } catch (e) {
         const msg = e instanceof Error ? e.message : "order failed";
         results.push({ user_id: userId, status: "error", detail: msg });
@@ -1042,7 +1077,14 @@ serve(async (req) => {
       }
     }
 
-    return jsonResponse({ success: true, processed: users.length, pct, results });
+    return jsonResponse({ 
+      success: true, 
+      processed: users.length, 
+      bestPair: bestPair.symbol,
+      pct: bestPct,
+      allPairs: pairData.map(p => ({ symbol: p.symbol, pct: p.pct.toFixed(2) })),
+      results 
+    });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Unknown error";
     return jsonResponse({ error: msg }, 500);
