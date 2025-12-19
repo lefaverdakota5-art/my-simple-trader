@@ -489,7 +489,7 @@ async function openaiVote(opts: {
     const controller = new AbortController();
     const t = setTimeout(() => controller.abort(), 8000);
     const prompt = `You are a conservative trading assistant. Vote YES/NO for placing a small market BUY.
-Return ONLY JSON: {"vote":"YES"|"NO","reason":"..."}.
+Return ONLY JSON: {"vote":"YES"|"NO","reason":"max 50 chars"}.
 
 Context:
 - Pair: ${opts.context.krakenPair}
@@ -501,7 +501,7 @@ Rules:
 - Prefer NO if volatility is high or ordersLeft is false.
 - Be conservative.`;
 
-    const r = await fetch("https://api.openai.com/v1/responses", {
+    const r = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       signal: controller.signal,
       headers: {
@@ -510,54 +510,33 @@ Rules:
       },
       body: JSON.stringify({
         model: opts.model || "gpt-4o-mini",
-        input: prompt,
+        messages: [
+          { role: "system", content: "You are a conservative trading assistant. Respond with valid JSON only." },
+          { role: "user", content: prompt },
+        ],
+        max_tokens: 80,
       }),
     });
     clearTimeout(t);
-    if (!r.ok) return null;
+    if (!r.ok) {
+      console.log(`[openai-vote] API error: ${r.status}`);
+      return null;
+    }
 
-    const text = await r.text();
-    const data = (() => {
-      try {
-        return text ? (JSON.parse(text) as Record<string, unknown>) : {};
-      } catch {
-        return {};
-      }
-    })();
-
-    const outputText =
-      (typeof data["output_text"] === "string" && (data["output_text"] as string)) ||
-      (Array.isArray(data["output"])
-        ? (() => {
-            for (const item of data["output"] as unknown[]) {
-              if (!item || typeof item !== "object") continue;
-              const content = (item as Record<string, unknown>)["content"];
-              if (!Array.isArray(content)) continue;
-              for (const c of content) {
-                if (!c || typeof c !== "object") continue;
-                if ((c as Record<string, unknown>)["type"] === "output_text") {
-                  const t = (c as Record<string, unknown>)["text"];
-                  if (typeof t === "string") return t;
-                }
-              }
-            }
-            return "";
-          })()
-        : "");
-
-    if (!outputText) return null;
-    const parsed = (() => {
-      try {
-        return JSON.parse(outputText) as { vote?: string; reason?: string };
-      } catch {
-        return null;
-      }
-    })();
+    const data = await r.json();
+    const content = data?.choices?.[0]?.message?.content || "";
+    let jsonStr = content.trim();
+    if (jsonStr.includes("```")) {
+      const match = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
+      if (match) jsonStr = match[1].trim();
+    }
+    const parsed = JSON.parse(jsonStr) as { vote?: string; reason?: string };
     if (!parsed?.vote) return null;
     const vote = String(parsed.vote).toUpperCase() === "YES";
-    const reason = typeof parsed.reason === "string" ? parsed.reason : "OpenAI vote";
+    const reason = typeof parsed.reason === "string" ? parsed.reason.slice(0, 50) : "OpenAI vote";
     return { vote, reason };
-  } catch {
+  } catch (e) {
+    console.log(`[openai-vote] Error: ${e instanceof Error ? e.message : "unknown"}`);
     return null;
   }
 }
@@ -771,11 +750,16 @@ serve(async (req) => {
         }
       }
 
-      // Optional OpenAI extra vote (if enabled)
-      if (keys?.openai_enabled && keys?.openai_api_key) {
+      // OpenAI Strategist vote - use user's key if enabled, or global key as fallback
+      const globalOpenAIKey = Deno.env.get("OPENAI_API_KEY");
+      const openaiApiKey = (keys?.openai_enabled && keys?.openai_api_key) 
+        ? String(keys.openai_api_key) 
+        : globalOpenAIKey;
+      
+      if (openaiApiKey) {
         const extra = await openaiVote({
-          apiKey: String(keys.openai_api_key),
-          model: String(keys.openai_model || "gpt-4o-mini"),
+          apiKey: openaiApiKey,
+          model: String(keys?.openai_model || "gpt-4o-mini"),
           context: aiContext,
         });
         if (extra) {
