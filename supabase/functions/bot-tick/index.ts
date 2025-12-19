@@ -41,13 +41,97 @@ function council(pct: number, ordersLeft: boolean) {
   const votes = [ai1, ai2, ai3, ai4, ai5];
   const yes = votes.filter(Boolean).length;
   const reasons = [
-    `${ai1 ? "YES" : "NO"}: momentum>0.10% (${pct.toFixed(2)}%)`,
-    `${ai2 ? "YES" : "NO"}: momentum>0.05% (${pct.toFixed(2)}%)`,
-    `${ai3 ? "YES" : "NO"}: momentum>0.00% (${pct.toFixed(2)}%)`,
-    `${ai4 ? "YES" : "NO"}: volatility<=2.00% (${pct.toFixed(2)}%)`,
-    `${ai5 ? "YES" : "NO"}: daily order limit`,
+    `${ai1 ? "YES" : "NO"}: Momentum Analyst • momentum>0.10% (${pct.toFixed(2)}%)`,
+    `${ai2 ? "YES" : "NO"}: Risk Manager • momentum>0.05% (${pct.toFixed(2)}%)`,
+    `${ai3 ? "YES" : "NO"}: Technical Analyst • momentum>0.00% (${pct.toFixed(2)}%)`,
+    `${ai4 ? "YES" : "NO"}: Volatility Guard • volatility<=2.00% (${pct.toFixed(2)}%)`,
+    `${ai5 ? "YES" : "NO"}: Portfolio Guardian • daily order limit`,
   ];
   return { votes: `${yes}/5`, reasons, approved: yes >= 4 };
+}
+
+// Top Trader Analyst - Uses Lovable AI to analyze what profitable traders would do
+async function topTraderAnalystVote(opts: {
+  pct: number;
+  krakenPair: string;
+  symbol: string;
+  ordersLeft: boolean;
+}): Promise<{ vote: boolean; reason: string } | null> {
+  const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
+  if (!LOVABLE_API_KEY) {
+    console.log("[top-trader-analyst] No LOVABLE_API_KEY found");
+    return null;
+  }
+
+  try {
+    const controller = new AbortController();
+    const t = setTimeout(() => controller.abort(), 10000);
+
+    const prompt = `You are the "Top Trader Analyst" - an AI that studies and follows the strategies of the world's most profitable stock and crypto traders like Warren Buffett, Ray Dalio, Cathie Wood, and top crypto whales.
+
+Analyze this trade opportunity based on what successful traders would do:
+
+Market Data:
+- Asset: ${opts.symbol} (Crypto pair: ${opts.krakenPair})
+- Today's price change: ${opts.pct.toFixed(2)}%
+- Can place more orders today: ${opts.ordersLeft ? "Yes" : "No"}
+
+Consider what top traders typically do:
+1. Warren Buffett: Value investing, buy quality at good prices
+2. Ray Dalio: Risk parity, diversification, economic cycles
+3. Top Crypto Whales: Accumulate during dips, sell into strength
+4. Momentum Traders: Follow trends, cut losses quickly
+
+Based on these strategies, should we place a small BUY order now?
+
+Respond with ONLY valid JSON: {"vote":"YES" or "NO","reason":"Brief 1-sentence explanation (max 60 chars)"}`;
+
+    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${LOVABLE_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: "google/gemini-2.5-flash",
+        messages: [
+          { role: "system", content: "You are a trading analysis AI that emulates strategies of top profitable traders. Always respond with valid JSON only." },
+          { role: "user", content: prompt },
+        ],
+        max_tokens: 100,
+      }),
+    });
+    clearTimeout(t);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.log(`[top-trader-analyst] API error: ${response.status} - ${errorText}`);
+      return null;
+    }
+
+    const data = await response.json();
+    const content = data?.choices?.[0]?.message?.content || "";
+    
+    // Extract JSON from response (handle markdown code blocks)
+    let jsonStr = content.trim();
+    if (jsonStr.includes("```")) {
+      const match = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
+      if (match) jsonStr = match[1].trim();
+    }
+
+    const parsed = JSON.parse(jsonStr) as { vote?: string; reason?: string };
+    if (!parsed?.vote) return null;
+
+    const vote = String(parsed.vote).toUpperCase() === "YES";
+    const reason = typeof parsed.reason === "string" ? parsed.reason.slice(0, 60) : "Top trader analysis";
+    
+    console.log(`[top-trader-analyst] Vote: ${vote ? "YES" : "NO"}, Reason: ${reason}`);
+    return { vote, reason };
+  } catch (e) {
+    console.log(`[top-trader-analyst] Error: ${e instanceof Error ? e.message : "unknown"}`);
+    return null;
+  }
 }
 
 async function openaiVote(opts: {
@@ -246,8 +330,23 @@ serve(async (req) => {
       const ordersLeft = ordersCount < maxOrdersPerDay;
 
       let c = council(pct, ordersLeft);
+      let totalMembers = 5;
+      let yesVotes = Number(String(c.votes).split("/")[0] || "0");
 
-      // Optional OpenAI extra vote adds a 6th council member
+      // ALWAYS add Top Trader Analyst (uses Lovable AI - no user config needed)
+      const topTraderVote = await topTraderAnalystVote({
+        pct,
+        krakenPair,
+        symbol: defaultSymbol,
+        ordersLeft,
+      });
+      if (topTraderVote) {
+        totalMembers++;
+        if (topTraderVote.vote) yesVotes++;
+        c.reasons.push(`${topTraderVote.vote ? "YES" : "NO"}: Top Trader Analyst • ${topTraderVote.reason}`);
+      }
+
+      // Optional OpenAI extra vote (7th member if enabled)
       if (keys?.openai_enabled && keys?.openai_api_key) {
         const extra = await openaiVote({
           apiKey: String(keys.openai_api_key),
@@ -255,17 +354,19 @@ serve(async (req) => {
           context: { pct, krakenPair, symbol: defaultSymbol, ordersLeft },
         });
         if (extra) {
-          const yesBase = Number(String(c.votes).split("/")[0] || "0");
-          const total = 6;
-          const yes = yesBase + (extra.vote ? 1 : 0);
-          const threshold = Math.ceil(total * 0.8); // 80% yes required
-          c = {
-            votes: `${yes}/${total}`,
-            reasons: [...c.reasons, `${extra.vote ? "YES" : "NO"}: OpenAI • ${extra.reason}`],
-            approved: yes >= threshold,
-          };
+          totalMembers++;
+          if (extra.vote) yesVotes++;
+          c.reasons.push(`${extra.vote ? "YES" : "NO"}: OpenAI Strategist • ${extra.reason}`);
         }
       }
+
+      // Recalculate approval with all members
+      const threshold = Math.ceil(totalMembers * 0.8); // 80% yes required
+      c = {
+        votes: `${yesVotes}/${totalMembers}`,
+        reasons: c.reasons,
+        approved: yesVotes >= threshold,
+      };
 
       // always publish council
       await supabaseAdmin.rpc("update_trader_state_from_webhook", {
@@ -328,4 +429,3 @@ serve(async (req) => {
     return jsonResponse({ error: msg }, 500);
   }
 });
-

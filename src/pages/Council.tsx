@@ -3,7 +3,15 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { useTraderState } from '@/hooks/useTraderState';
 
-const DEFAULT_AI_NAMES = ['AI 1', 'AI 2', 'AI 3', 'AI 4', 'AI 5', 'AI 6', 'AI 7', 'AI 8', 'AI 9', 'AI 10'];
+const DEFAULT_AI_NAMES = [
+  'Momentum Analyst',
+  'Risk Manager', 
+  'Technical Analyst',
+  'Volatility Guard',
+  'Portfolio Guardian',
+  'Top Trader Analyst',
+  'OpenAI Strategist',
+];
 
 export default function Council() {
   const { user, loading: authLoading } = useAuth();
@@ -32,11 +40,18 @@ export default function Council() {
   const threshold = Math.ceil(totalVotes * 0.8); // 80% YES required
   const isApproved = yesVotes >= threshold;
 
-  // Get reasons from state (variable length)
+  // Get reasons from state - parse AI name from reason string
   const reasons = state?.council_reasons || [];
-  const aiNames = Array.from({ length: Math.max(reasons.length, totalVotes) }).map(
-    (_, i) => DEFAULT_AI_NAMES[i] || `AI ${i + 1}`,
-  );
+  const parsedVotes = reasons.map((reason, index) => {
+    // Parse format: "YES: AI Name • explanation" or "NO: AI Name • explanation"
+    const isYes = reason.toUpperCase().startsWith('YES');
+    const parts = reason.split('•');
+    const nameMatch = reason.match(/^(YES|NO):\s*([^•]+)/i);
+    const aiName = nameMatch ? nameMatch[2].trim() : DEFAULT_AI_NAMES[index] || `AI ${index + 1}`;
+    const explanation = parts.length > 1 ? parts.slice(1).join('•').trim() : reason;
+    
+    return { aiName, isYes, explanation, fullReason: reason };
+  });
 
   return (
     <div className="app-container">
@@ -52,33 +67,49 @@ export default function Council() {
 
       {/* AI Votes List */}
       <div style={{ marginBottom: '24px' }}>
-        {aiNames.map((name, index) => {
-          const reason = reasons[index] || 'Awaiting analysis...';
-          const isYes = reason.toLowerCase().includes('yes') || 
-                        reason.toLowerCase().startsWith('buy') ||
-                        reason.toLowerCase().includes('bullish');
-          
-          return (
-            <div 
-              key={name} 
-              style={{ 
-                padding: '12px', 
-                borderBottom: '1px solid hsl(var(--border))',
-                marginBottom: '8px' 
-              }}
-            >
-              <p style={{ fontWeight: '600', marginBottom: '4px' }}>
-                {name}: <span style={{ color: isYes ? 'hsl(var(--success))' : 'hsl(var(--destructive))' }}>
-                  {isYes ? 'YES' : 'NO'}
-                </span>
-              </p>
-              <p style={{ color: 'hsl(var(--muted-foreground))', fontSize: '0.875rem' }}>
-                {reason || 'No reason provided'}
-              </p>
-            </div>
-          );
-        })}
+        {parsedVotes.length > 0 ? parsedVotes.map((vote, index) => (
+          <div 
+            key={index} 
+            style={{ 
+              padding: '12px', 
+              borderBottom: '1px solid hsl(var(--border))',
+              marginBottom: '8px' 
+            }}
+          >
+            <p style={{ fontWeight: '600', marginBottom: '4px' }}>
+              {vote.aiName}: <span style={{ color: vote.isYes ? 'hsl(var(--success))' : 'hsl(var(--destructive))' }}>
+                {vote.isYes ? 'YES' : 'NO'}
+              </span>
+            </p>
+            <p style={{ color: 'hsl(var(--muted-foreground))', fontSize: '0.875rem' }}>
+              {vote.explanation}
+            </p>
+          </div>
+        )) : (
+          <p style={{ color: 'hsl(var(--muted-foreground))' }}>
+            Awaiting council analysis... Enable the swarm to see AI votes.
+          </p>
+        )}
       </div>
+
+      {/* Council Vote Summary */}
+      <p 
+        className="big-text" 
+        style={{ 
+          color: isApproved ? 'hsl(var(--success))' : 'hsl(var(--destructive))',
+          marginBottom: '16px'
+        }}
+      >
+        Council Vote: {votesStr} YES
+      </p>
+
+      <p style={{ color: 'hsl(var(--muted-foreground))' }}>
+        Trade only executes if {threshold}/{totalVotes} or higher YES (≥80%)
+      </p>
+
+      <p style={{ color: 'hsl(var(--muted-foreground))', fontSize: '0.875rem', marginTop: '12px' }}>
+        Council includes: 5 core AIs + Top Trader Analyst (follows profitable traders) + OpenAI Strategist (if enabled)
+      </p>
 
       {/* Council Vote Summary */}
       <p 
