@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
+import { z } from "zod";
 import {
   getBotApiBaseUrl,
   getKrakenWithdrawAsset,
@@ -11,6 +12,32 @@ import {
   setKrakenWithdrawAsset,
   setKrakenWithdrawKeyUsd,
 } from "@/lib/botApi";
+
+// Validation schema - at least one pair of keys required
+const apiKeysSchema = z.object({
+  alpacaKey: z.string().trim(),
+  alpacaSecret: z.string().trim(),
+  krakenKey: z.string().trim(),
+  krakenSecret: z.string().trim(),
+  plaidClientId: z.string().trim(),
+  plaidSecret: z.string().trim(),
+  openaiEnabled: z.boolean(),
+  openaiApiKey: z.string().trim(),
+}).refine(
+  (data) => {
+    const hasAlpaca = data.alpacaKey.length > 0 && data.alpacaSecret.length > 0;
+    const hasKraken = data.krakenKey.length > 0 && data.krakenSecret.length > 0;
+    const hasPlaid = data.plaidClientId.length > 0 && data.plaidSecret.length > 0;
+    const hasOpenai = !data.openaiEnabled || data.openaiApiKey.length > 0;
+    // Valid if at least one integration is complete OR no fields filled (just updating settings)
+    const hasAnyPair = hasAlpaca || hasKraken || hasPlaid;
+    const partialAlpaca = (data.alpacaKey.length > 0) !== (data.alpacaSecret.length > 0);
+    const partialKraken = (data.krakenKey.length > 0) !== (data.krakenSecret.length > 0);
+    const partialPlaid = (data.plaidClientId.length > 0) !== (data.plaidSecret.length > 0);
+    return !partialAlpaca && !partialKraken && !partialPlaid && hasOpenai;
+  },
+  { message: "Please provide both key and secret for each integration, or leave both empty" }
+);
 
 export default function Settings() {
   const { user, loading: authLoading } = useAuth();
@@ -39,6 +66,7 @@ export default function Settings() {
     openaiModel?: string;
   } | null>(null);
   const [loadingStatus, setLoadingStatus] = useState(true);
+  const [validationError, setValidationError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!authLoading && !user) navigate("/");
@@ -273,28 +301,70 @@ export default function Settings() {
           </>
         )}
 
+        {validationError && (
+          <div style={{
+            padding: "12px",
+            marginBottom: "12px",
+            background: "hsl(0, 84%, 60%, 0.1)",
+            border: "1px solid hsl(0, 84%, 60%)",
+            borderRadius: "8px",
+            color: "hsl(0, 84%, 60%)",
+            fontSize: "0.9rem"
+          }}>
+            {validationError}
+          </div>
+        )}
+
         <button
           className="plain-button"
           disabled={submitting}
           onClick={async () => {
+            setValidationError(null);
+            
+            // Validate inputs
+            const validationResult = apiKeysSchema.safeParse({
+              alpacaKey,
+              alpacaSecret,
+              krakenKey,
+              krakenSecret,
+              plaidClientId,
+              plaidSecret,
+              openaiEnabled,
+              openaiApiKey,
+            });
+            
+            if (!validationResult.success) {
+              setValidationError(validationResult.error.errors[0]?.message || "Validation failed");
+              return;
+            }
+            
+            // Check if OpenAI is enabled but no key provided
+            if (openaiEnabled && !openaiApiKey.trim()) {
+              setValidationError("OpenAI API key is required when OpenAI is enabled");
+              return;
+            }
+            
             const { data } = await supabase.auth.getSession();
             const token = data.session?.access_token;
-            if (!token) return;
+            if (!token) {
+              toast({ title: "Error", description: "Not authenticated", variant: "destructive" });
+              return;
+            }
             setSubmitting(true);
             try {
               // Prefer Supabase Edge Function so you don't need a separate backend server.
               const { data: resp, error } = await supabase.functions.invoke("bot-actions", {
                 body: {
                   action: "set_keys",
-                  alpaca_api_key: alpacaKey,
-                  alpaca_secret: alpacaSecret,
-                  kraken_key: krakenKey,
-                  kraken_secret: krakenSecret,
-                  plaid_client_id: plaidClientId,
-                  plaid_secret: plaidSecret,
+                  alpaca_api_key: alpacaKey.trim() || null,
+                  alpaca_secret: alpacaSecret.trim() || null,
+                  kraken_key: krakenKey.trim() || null,
+                  kraken_secret: krakenSecret.trim() || null,
+                  plaid_client_id: plaidClientId.trim() || null,
+                  plaid_secret: plaidSecret.trim() || null,
                   plaid_env: plaidEnv,
                   openai_enabled: openaiEnabled,
-                  openai_api_key: openaiApiKey,
+                  openai_api_key: openaiApiKey.trim() || null,
                   openai_model: openaiModel,
                 },
               });
