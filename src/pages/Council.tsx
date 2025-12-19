@@ -10,6 +10,8 @@ const DEFAULT_AI_NAMES = [
   'Volatility Guard',
   'Portfolio Guardian',
   'Top Trader Analyst',
+  'News Sentiment AI',
+  'Whale Tracker AI',
   'OpenAI Strategist',
 ];
 
@@ -108,7 +110,7 @@ export default function Council() {
       </p>
 
       <p style={{ color: 'hsl(var(--muted-foreground))', fontSize: '0.875rem', marginTop: '12px' }}>
-        Council includes: 5 core AIs + Top Trader Analyst (follows profitable traders) + OpenAI Strategist (if enabled)
+        Council: 5 core AIs + Top Trader Analyst + News Sentiment AI + Whale Tracker AI + OpenAI (if enabled)
       </p>
 
       {/* Council Vote Summary */}

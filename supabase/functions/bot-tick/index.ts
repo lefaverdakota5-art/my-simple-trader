@@ -58,78 +58,173 @@ async function topTraderAnalystVote(opts: {
   ordersLeft: boolean;
 }): Promise<{ vote: boolean; reason: string } | null> {
   const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-  if (!LOVABLE_API_KEY) {
-    console.log("[top-trader-analyst] No LOVABLE_API_KEY found");
-    return null;
-  }
+  if (!LOVABLE_API_KEY) return null;
 
   try {
     const controller = new AbortController();
     const t = setTimeout(() => controller.abort(), 10000);
 
-    const prompt = `You are the "Top Trader Analyst" - an AI that studies and follows the strategies of the world's most profitable stock and crypto traders like Warren Buffett, Ray Dalio, Cathie Wood, and top crypto whales.
-
-Analyze this trade opportunity based on what successful traders would do:
+    const prompt = `You are the "Top Trader Analyst" - an AI that studies strategies of the world's most profitable traders like Warren Buffett, Ray Dalio, Cathie Wood, and top crypto whales.
 
 Market Data:
-- Asset: ${opts.symbol} (Crypto pair: ${opts.krakenPair})
+- Asset: ${opts.symbol} (Crypto: ${opts.krakenPair})
 - Today's price change: ${opts.pct.toFixed(2)}%
-- Can place more orders today: ${opts.ordersLeft ? "Yes" : "No"}
+- Can place orders: ${opts.ordersLeft ? "Yes" : "No"}
 
-Consider what top traders typically do:
-1. Warren Buffett: Value investing, buy quality at good prices
-2. Ray Dalio: Risk parity, diversification, economic cycles
-3. Top Crypto Whales: Accumulate during dips, sell into strength
-4. Momentum Traders: Follow trends, cut losses quickly
-
-Based on these strategies, should we place a small BUY order now?
-
-Respond with ONLY valid JSON: {"vote":"YES" or "NO","reason":"Brief 1-sentence explanation (max 60 chars)"}`;
+Based on what top traders typically do, should we BUY now?
+Respond with ONLY JSON: {"vote":"YES" or "NO","reason":"Brief reason (max 50 chars)"}`;
 
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
       signal: controller.signal,
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
-      },
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${LOVABLE_API_KEY}` },
       body: JSON.stringify({
         model: "google/gemini-2.5-flash",
         messages: [
-          { role: "system", content: "You are a trading analysis AI that emulates strategies of top profitable traders. Always respond with valid JSON only." },
+          { role: "system", content: "You emulate top trader strategies. Respond with valid JSON only." },
           { role: "user", content: prompt },
         ],
-        max_tokens: 100,
+        max_tokens: 80,
       }),
     });
     clearTimeout(t);
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.log(`[top-trader-analyst] API error: ${response.status} - ${errorText}`);
-      return null;
-    }
+    if (!response.ok) return null;
 
     const data = await response.json();
     const content = data?.choices?.[0]?.message?.content || "";
-    
-    // Extract JSON from response (handle markdown code blocks)
     let jsonStr = content.trim();
     if (jsonStr.includes("```")) {
       const match = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
       if (match) jsonStr = match[1].trim();
     }
-
     const parsed = JSON.parse(jsonStr) as { vote?: string; reason?: string };
     if (!parsed?.vote) return null;
-
-    const vote = String(parsed.vote).toUpperCase() === "YES";
-    const reason = typeof parsed.reason === "string" ? parsed.reason.slice(0, 60) : "Top trader analysis";
-    
-    console.log(`[top-trader-analyst] Vote: ${vote ? "YES" : "NO"}, Reason: ${reason}`);
-    return { vote, reason };
+    return { vote: String(parsed.vote).toUpperCase() === "YES", reason: (parsed.reason || "").slice(0, 50) };
   } catch (e) {
     console.log(`[top-trader-analyst] Error: ${e instanceof Error ? e.message : "unknown"}`);
+    return null;
+  }
+}
+
+// News Sentiment AI - Analyzes current market news sentiment
+async function newsSentimentVote(opts: {
+  pct: number;
+  krakenPair: string;
+  symbol: string;
+  ordersLeft: boolean;
+}): Promise<{ vote: boolean; reason: string } | null> {
+  const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
+  if (!LOVABLE_API_KEY) return null;
+
+  try {
+    const controller = new AbortController();
+    const t = setTimeout(() => controller.abort(), 10000);
+
+    const prompt = `You are "News Sentiment AI" - an expert at analyzing market news and social sentiment for trading decisions.
+
+Market Data:
+- Asset: ${opts.symbol} (Crypto: ${opts.krakenPair})
+- Today's price change: ${opts.pct.toFixed(2)}%
+- Can place orders: ${opts.ordersLeft ? "Yes" : "No"}
+
+Based on typical market sentiment patterns:
+- Positive momentum (>0.5%) often indicates bullish news
+- Negative momentum (<-0.5%) may indicate bearish sentiment
+- High volatility (>2%) suggests uncertain sentiment
+
+Analyze the implied sentiment and recommend: should we BUY?
+Respond with ONLY JSON: {"vote":"YES" or "NO","reason":"Brief sentiment analysis (max 50 chars)"}`;
+
+    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      method: "POST",
+      signal: controller.signal,
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${LOVABLE_API_KEY}` },
+      body: JSON.stringify({
+        model: "google/gemini-2.5-flash",
+        messages: [
+          { role: "system", content: "You analyze market sentiment. Respond with valid JSON only." },
+          { role: "user", content: prompt },
+        ],
+        max_tokens: 80,
+      }),
+    });
+    clearTimeout(t);
+    if (!response.ok) return null;
+
+    const data = await response.json();
+    const content = data?.choices?.[0]?.message?.content || "";
+    let jsonStr = content.trim();
+    if (jsonStr.includes("```")) {
+      const match = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
+      if (match) jsonStr = match[1].trim();
+    }
+    const parsed = JSON.parse(jsonStr) as { vote?: string; reason?: string };
+    if (!parsed?.vote) return null;
+    return { vote: String(parsed.vote).toUpperCase() === "YES", reason: (parsed.reason || "").slice(0, 50) };
+  } catch (e) {
+    console.log(`[news-sentiment] Error: ${e instanceof Error ? e.message : "unknown"}`);
+    return null;
+  }
+}
+
+// Whale Tracker AI - Tracks large holder movements
+async function whaleTrackerVote(opts: {
+  pct: number;
+  krakenPair: string;
+  symbol: string;
+  ordersLeft: boolean;
+}): Promise<{ vote: boolean; reason: string } | null> {
+  const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
+  if (!LOVABLE_API_KEY) return null;
+
+  try {
+    const controller = new AbortController();
+    const t = setTimeout(() => controller.abort(), 10000);
+
+    const prompt = `You are "Whale Tracker AI" - an expert at predicting large institutional and whale trader behavior in crypto and stocks.
+
+Market Data:
+- Asset: ${opts.symbol} (Crypto: ${opts.krakenPair})
+- Today's price change: ${opts.pct.toFixed(2)}%
+- Can place orders: ${opts.ordersLeft ? "Yes" : "No"}
+
+Whale behavior patterns to consider:
+- Whales often accumulate during slight dips (0% to -1%)
+- Whales typically avoid buying during high volatility (>2%)
+- Smart money follows momentum but enters before retail
+- Large holders prefer stable prices for accumulation
+
+Based on whale behavior patterns, should we BUY?
+Respond with ONLY JSON: {"vote":"YES" or "NO","reason":"Brief whale analysis (max 50 chars)"}`;
+
+    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      method: "POST",
+      signal: controller.signal,
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${LOVABLE_API_KEY}` },
+      body: JSON.stringify({
+        model: "google/gemini-2.5-flash",
+        messages: [
+          { role: "system", content: "You predict whale trader behavior. Respond with valid JSON only." },
+          { role: "user", content: prompt },
+        ],
+        max_tokens: 80,
+      }),
+    });
+    clearTimeout(t);
+    if (!response.ok) return null;
+
+    const data = await response.json();
+    const content = data?.choices?.[0]?.message?.content || "";
+    let jsonStr = content.trim();
+    if (jsonStr.includes("```")) {
+      const match = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
+      if (match) jsonStr = match[1].trim();
+    }
+    const parsed = JSON.parse(jsonStr) as { vote?: string; reason?: string };
+    if (!parsed?.vote) return null;
+    return { vote: String(parsed.vote).toUpperCase() === "YES", reason: (parsed.reason || "").slice(0, 50) };
+  } catch (e) {
+    console.log(`[whale-tracker] Error: ${e instanceof Error ? e.message : "unknown"}`);
     return null;
   }
 }
@@ -333,25 +428,41 @@ serve(async (req) => {
       let totalMembers = 5;
       let yesVotes = Number(String(c.votes).split("/")[0] || "0");
 
-      // ALWAYS add Top Trader Analyst (uses Lovable AI - no user config needed)
-      const topTraderVote = await topTraderAnalystVote({
-        pct,
-        krakenPair,
-        symbol: defaultSymbol,
-        ordersLeft,
-      });
+      // Run all AI analysts in parallel for speed (uses Lovable AI - no user config needed)
+      const aiContext = { pct, krakenPair, symbol: defaultSymbol, ordersLeft };
+      const [topTraderVote, newsSentimentResult, whaleTrackerResult] = await Promise.all([
+        topTraderAnalystVote(aiContext),
+        newsSentimentVote(aiContext),
+        whaleTrackerVote(aiContext),
+      ]);
+
+      // Add Top Trader Analyst vote
       if (topTraderVote) {
         totalMembers++;
         if (topTraderVote.vote) yesVotes++;
         c.reasons.push(`${topTraderVote.vote ? "YES" : "NO"}: Top Trader Analyst • ${topTraderVote.reason}`);
       }
 
-      // Optional OpenAI extra vote (7th member if enabled)
+      // Add News Sentiment AI vote
+      if (newsSentimentResult) {
+        totalMembers++;
+        if (newsSentimentResult.vote) yesVotes++;
+        c.reasons.push(`${newsSentimentResult.vote ? "YES" : "NO"}: News Sentiment AI • ${newsSentimentResult.reason}`);
+      }
+
+      // Add Whale Tracker AI vote
+      if (whaleTrackerResult) {
+        totalMembers++;
+        if (whaleTrackerResult.vote) yesVotes++;
+        c.reasons.push(`${whaleTrackerResult.vote ? "YES" : "NO"}: Whale Tracker AI • ${whaleTrackerResult.reason}`);
+      }
+
+      // Optional OpenAI extra vote (9th member if enabled)
       if (keys?.openai_enabled && keys?.openai_api_key) {
         const extra = await openaiVote({
           apiKey: String(keys.openai_api_key),
           model: String(keys.openai_model || "gpt-4o-mini"),
-          context: { pct, krakenPair, symbol: defaultSymbol, ordersLeft },
+          context: aiContext,
         });
         if (extra) {
           totalMembers++;
