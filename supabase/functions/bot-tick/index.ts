@@ -480,63 +480,74 @@ Respond with ONLY JSON: {"vote":"YES" or "NO","reason":"Brief breakout analysis 
   });
 }
 
-async function openaiVote(opts: {
-  apiKey: string;
-  model: string;
+async function lovableAiStrategistVote(opts: {
   context: { pct: number; krakenPair: string; symbol: string; ordersLeft: boolean };
 }): Promise<{ vote: boolean; reason: string } | null> {
   try {
+    const lovableApiKey = Deno.env.get("LOVABLE_API_KEY");
+    if (!lovableApiKey) {
+      console.log("[lovable-strategist] No LOVABLE_API_KEY configured");
+      return null;
+    }
+
     const controller = new AbortController();
-    const t = setTimeout(() => controller.abort(), 8000);
-    const prompt = `You are a conservative trading assistant. Vote YES/NO for placing a small market BUY.
-Return ONLY JSON: {"vote":"YES"|"NO","reason":"max 50 chars"}.
+    const t = setTimeout(() => controller.abort(), 10000);
+    
+    const prompt = `You are a conservative crypto trading assistant. Vote YES or NO for placing a small market BUY order.
+Return ONLY valid JSON: {"vote":"YES"|"NO","reason":"max 50 chars"}
 
 Context:
 - Pair: ${opts.context.krakenPair}
-- Pair pct change today: ${opts.context.pct.toFixed(2)}%
-- Stock symbol: ${opts.context.symbol}
-- Orders left today: ${opts.context.ordersLeft}
+- Price change today: ${opts.context.pct.toFixed(2)}%
+- Symbol: ${opts.context.symbol}
+- Orders remaining today: ${opts.context.ordersLeft}
 
 Rules:
-- Prefer NO if volatility is high or ordersLeft is false.
-- Be conservative.`;
+- Vote NO if volatility is high (>5% move) or ordersLeft is false
+- Vote YES only on mild dips (-1% to -3%) with stable conditions
+- Be conservative - when in doubt, vote NO`;
 
-    const r = await fetch("https://api.openai.com/v1/chat/completions", {
+    const r = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
       signal: controller.signal,
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${opts.apiKey}`,
+        Authorization: `Bearer ${lovableApiKey}`,
       },
       body: JSON.stringify({
-        model: opts.model || "gpt-4o-mini",
+        model: "google/gemini-2.5-flash",
         messages: [
-          { role: "system", content: "You are a conservative trading assistant. Respond with valid JSON only." },
+          { role: "system", content: "You are a conservative trading assistant. Respond with valid JSON only, no markdown." },
           { role: "user", content: prompt },
         ],
-        max_tokens: 80,
       }),
     });
     clearTimeout(t);
+    
     if (!r.ok) {
-      console.log(`[openai-vote] API error: ${r.status}`);
+      console.log(`[lovable-strategist] API error: ${r.status}`);
       return null;
     }
 
     const data = await r.json();
     const content = data?.choices?.[0]?.message?.content || "";
     let jsonStr = content.trim();
+    
+    // Clean markdown if present
     if (jsonStr.includes("```")) {
       const match = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
       if (match) jsonStr = match[1].trim();
     }
+    
     const parsed = JSON.parse(jsonStr) as { vote?: string; reason?: string };
     if (!parsed?.vote) return null;
+    
     const vote = String(parsed.vote).toUpperCase() === "YES";
-    const reason = typeof parsed.reason === "string" ? parsed.reason.slice(0, 50) : "OpenAI vote";
+    const reason = typeof parsed.reason === "string" ? parsed.reason.slice(0, 50) : "Lovable AI vote";
+    console.log(`[lovable-strategist] Vote: ${vote ? "YES" : "NO"}, Reason: ${reason}`);
     return { vote, reason };
   } catch (e) {
-    console.log(`[openai-vote] Error: ${e instanceof Error ? e.message : "unknown"}`);
+    console.log(`[lovable-strategist] Error: ${e instanceof Error ? e.message : "unknown"}`);
     return null;
   }
 }
@@ -750,23 +761,12 @@ serve(async (req) => {
         }
       }
 
-      // OpenAI Strategist vote - use user's key if enabled, or global key as fallback
-      const globalOpenAIKey = Deno.env.get("OPENAI_API_KEY");
-      const openaiApiKey = (keys?.openai_enabled && keys?.openai_api_key) 
-        ? String(keys.openai_api_key) 
-        : globalOpenAIKey;
-      
-      if (openaiApiKey) {
-        const extra = await openaiVote({
-          apiKey: openaiApiKey,
-          model: String(keys?.openai_model || "gpt-4o-mini"),
-          context: aiContext,
-        });
-        if (extra) {
-          totalMembers++;
-          if (extra.vote) yesVotes++;
-          c.reasons.push(`${extra.vote ? "YES" : "NO"}: OpenAI Strategist • ${extra.reason}`);
-        }
+      // Lovable AI Strategist vote - uses pre-configured LOVABLE_API_KEY (no user key needed)
+      const lovableVote = await lovableAiStrategistVote({ context: aiContext });
+      if (lovableVote) {
+        totalMembers++;
+        if (lovableVote.vote) yesVotes++;
+        c.reasons.push(`${lovableVote.vote ? "YES" : "NO"}: AI Strategist • ${lovableVote.reason}`);
       }
 
       // Recalculate approval with all members
