@@ -26,9 +26,11 @@ const COIN_CONFIG = [
 export function CryptoPriceTicker() {
   const [prices, setPrices] = useState<PriceData>({ btc: null, eth: null, xrp: null, sol: null, doge: null });
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
 
-  const fetchPrices = async () => {
+  const fetchPrices = async (isManual = false) => {
+    if (isManual) setRefreshing(true);
     try {
       const response = await fetch(
         "https://api.kraken.com/0/public/Ticker?pair=XBTUSD,ETHUSD,XRPUSD,SOLUSD,DOGEUSD"
@@ -61,6 +63,7 @@ export function CryptoPriceTicker() {
       console.error("Failed to fetch Kraken prices:", error);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
 
@@ -117,6 +120,14 @@ export function CryptoPriceTicker() {
           </Badge>
         );
       })}
+      <button
+        onClick={() => fetchPrices(true)}
+        disabled={refreshing}
+        className="p-1.5 rounded-md hover:bg-muted transition-colors disabled:opacity-50"
+        title="Refresh prices"
+      >
+        <RefreshCw className={`h-4 w-4 text-muted-foreground ${refreshing ? "animate-spin" : ""}`} />
+      </button>
       {lastUpdate && (
         <span className="text-xs text-muted-foreground">
           {lastUpdate.toLocaleTimeString()}
