@@ -6,6 +6,7 @@ import {
   PlaidEnvironments,
   type LinkTokenCreateRequest,
   type Products,
+  type CountryCode,
 } from "https://esm.sh/plaid@18.3.0";
 
 const corsHeaders = {
@@ -105,7 +106,7 @@ serve(async (req) => {
         user: { client_user_id: userId },
         client_name: "AI Trader",
         products: getProducts() as unknown as Products[],
-        country_codes: ["US"],
+        country_codes: ["US"] as unknown as CountryCode[],
         language: "en",
         redirect_uri: redirectUri,
       };
