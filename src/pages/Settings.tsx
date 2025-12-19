@@ -5,30 +5,23 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { z } from "zod";
 import {
-  getBotApiBaseUrl,
   getKrakenWithdrawAsset,
   getKrakenWithdrawKeyUsd,
-  setBotApiBaseUrl,
   setKrakenWithdrawAsset,
   setKrakenWithdrawKeyUsd,
 } from "@/lib/botApi";
 
-// Validation schema - Kraken is primary, others optional
+// Validation schema - Kraken for trading, Plaid for banking
 const apiKeysSchema = z.object({
   krakenKey: z.string().trim(),
   krakenSecret: z.string().trim(),
   plaidClientId: z.string().trim(),
   plaidSecret: z.string().trim(),
-  openaiEnabled: z.boolean(),
-  openaiApiKey: z.string().trim(),
 }).refine(
   (data) => {
-    const hasKraken = data.krakenKey.length > 0 && data.krakenSecret.length > 0;
-    const hasPlaid = data.plaidClientId.length > 0 && data.plaidSecret.length > 0;
-    const hasOpenai = !data.openaiEnabled || data.openaiApiKey.length > 0;
     const partialKraken = (data.krakenKey.length > 0) !== (data.krakenSecret.length > 0);
     const partialPlaid = (data.plaidClientId.length > 0) !== (data.plaidSecret.length > 0);
-    return !partialKraken && !partialPlaid && hasOpenai;
+    return !partialKraken && !partialPlaid;
   },
   { message: "Please provide both key and secret for each integration, or leave both empty" }
 );
@@ -37,7 +30,6 @@ export default function Settings() {
   const { user, loading: authLoading } = useAuth();
   const navigate = useNavigate();
 
-  const [botUrl, setBotUrl] = useState("");
   const [krakenWithdrawKey, setKrakenWithdrawKey] = useState("");
   const [krakenWithdrawAsset, setKrakenWithdrawAssetState] = useState("ZUSD");
   const [krakenKey, setKrakenKey] = useState("");
@@ -45,16 +37,11 @@ export default function Settings() {
   const [plaidClientId, setPlaidClientId] = useState("");
   const [plaidSecret, setPlaidSecret] = useState("");
   const [plaidEnv, setPlaidEnv] = useState("production");
-  const [openaiEnabled, setOpenaiEnabled] = useState(false);
-  const [openaiApiKey, setOpenaiApiKey] = useState("");
-  const [openaiModel, setOpenaiModel] = useState("gpt-4o-mini");
   const [submitting, setSubmitting] = useState(false);
   const [status, setStatus] = useState<{
     krakenOk?: boolean;
     plaidOk?: boolean;
-    openaiOk?: boolean;
     plaidEnv?: string;
-    openaiModel?: string;
   } | null>(null);
   const [loadingStatus, setLoadingStatus] = useState(true);
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -72,12 +59,11 @@ export default function Settings() {
   }, [authLoading, user, navigate]);
 
   useEffect(() => {
-    setBotUrl(getBotApiBaseUrl());
     setKrakenWithdrawKey(getKrakenWithdrawKeyUsd());
     setKrakenWithdrawAssetState(getKrakenWithdrawAsset());
   }, []);
 
-  // Load current status from bot-actions
+  // Load current status
   useEffect(() => {
     async function loadStatus() {
       if (!user) return;
@@ -89,8 +75,6 @@ export default function Settings() {
         if (!error && data?.success) {
           setStatus(data);
           if (data.plaidEnv) setPlaidEnv(data.plaidEnv);
-          if (data.openaiModel) setOpenaiModel(data.openaiModel);
-          if (data.openaiOk) setOpenaiEnabled(true);
         }
       } catch (e) {
         console.error("Failed to load status:", e);
@@ -115,32 +99,23 @@ export default function Settings() {
         Settings
       </h1>
 
-      <div style={{ marginBottom: "12px" }}>
-        <label style={{ display: "block", marginBottom: "4px", fontWeight: 500 }}>
-          Bot Backend URL (FastAPI)
-        </label>
-        <input
-          className="plain-input"
-          value={botUrl}
-          onChange={(e) => setBotUrl(e.target.value)}
-          placeholder="http://192.168.1.50:8000"
-        />
+      {/* AI Council Info */}
+      <div style={{ 
+        padding: "16px", 
+        marginBottom: "24px",
+        background: "linear-gradient(135deg, hsl(var(--primary) / 0.1), hsl(var(--accent) / 0.1))",
+        borderRadius: "12px",
+        border: "1px solid hsl(var(--primary) / 0.2)"
+      }}>
+        <h3 style={{ fontWeight: 600, marginBottom: "8px", color: "hsl(var(--primary))" }}>
+          ✨ AI Council Powered by Lovable
+        </h3>
+        <p style={{ color: "hsl(var(--muted-foreground))", fontSize: "0.9rem", margin: 0 }}>
+          Your trading decisions are analyzed by 21 AI council members using Lovable AI and Perplexity for real-time news. No API keys required!
+        </p>
       </div>
 
-      <button
-        className="plain-button"
-        onClick={() => {
-          setBotApiBaseUrl(botUrl);
-          setKrakenWithdrawKeyUsd(krakenWithdrawKey);
-          setKrakenWithdrawAsset(krakenWithdrawAsset);
-          navigate("/dashboard");
-        }}
-        style={{ fontWeight: 600 }}
-      >
-        Save
-      </button>
-
-      <div style={{ marginTop: "24px" }}>
+      <div style={{ marginBottom: "24px" }}>
         <h2 className="medium-text" style={{ fontWeight: 600, marginBottom: "12px" }}>
           Notifications
         </h2>
@@ -178,9 +153,9 @@ export default function Settings() {
         )}
       </div>
 
-      <div style={{ marginTop: "24px" }}>
+      <div style={{ marginBottom: "24px" }}>
         <h2 className="medium-text" style={{ fontWeight: 600, marginBottom: "12px" }}>
-          Trading API Keys (sent to your backend)
+          Exchange & Banking Keys
         </h2>
         
         {/* Status indicators */}
@@ -202,14 +177,11 @@ export default function Settings() {
             <span style={{ color: status.plaidOk ? "hsl(142, 76%, 36%)" : "hsl(var(--muted-foreground))" }}>
               {status.plaidOk ? "✓" : "○"} Plaid (Banking)
             </span>
-            <span style={{ color: status.openaiOk ? "hsl(142, 76%, 36%)" : "hsl(var(--muted-foreground))" }}>
-              {status.openaiOk ? "✓" : "○"} OpenAI (AI Council)
-            </span>
           </div>
         )}
         
         <p style={{ color: "hsl(var(--muted-foreground))", fontSize: "0.9rem", marginBottom: "12px" }}>
-          Enter or paste your API keys directly into the text fields below, then press “Send to Backend”. Keys are stored in Supabase for the bot.
+          Kraken keys are required for live trading. Plaid is optional for bank withdrawals.
         </p>
 
         <div style={{ marginBottom: "12px" }}>
@@ -222,7 +194,7 @@ export default function Settings() {
             spellCheck={false}
             value={krakenKey}
             onChange={(e) => setKrakenKey(e.target.value)}
-            placeholder="Paste or type your Kraken API key"
+            placeholder="Paste your Kraken API key"
           />
         </div>
         <div style={{ marginBottom: "12px" }}>
@@ -235,12 +207,12 @@ export default function Settings() {
             spellCheck={false}
             value={krakenSecret}
             onChange={(e) => setKrakenSecret(e.target.value)}
-            placeholder="Paste or type your Kraken secret"
+            placeholder="Paste your Kraken secret"
           />
         </div>
 
         <div style={{ marginBottom: "12px" }}>
-          <label style={{ display: "block", marginBottom: "4px", fontWeight: 500 }}>Plaid Client ID</label>
+          <label style={{ display: "block", marginBottom: "4px", fontWeight: 500 }}>Plaid Client ID (optional)</label>
           <input
             className="plain-input"
             type="text"
@@ -249,7 +221,7 @@ export default function Settings() {
             spellCheck={false}
             value={plaidClientId}
             onChange={(e) => setPlaidClientId(e.target.value)}
-            placeholder="Paste or type your Plaid Client ID"
+            placeholder="For bank withdrawals"
           />
         </div>
         <div style={{ marginBottom: "12px" }}>
@@ -262,51 +234,17 @@ export default function Settings() {
             spellCheck={false}
             value={plaidSecret}
             onChange={(e) => setPlaidSecret(e.target.value)}
-            placeholder="Paste or type your Plaid secret"
+            placeholder="Plaid secret key"
           />
         </div>
         <div style={{ marginBottom: "12px" }}>
-          <label style={{ display: "block", marginBottom: "4px", fontWeight: 500 }}>Plaid Env</label>
+          <label style={{ display: "block", marginBottom: "4px", fontWeight: 500 }}>Plaid Environment</label>
           <select className="plain-input" value={plaidEnv} onChange={(e) => setPlaidEnv(e.target.value)}>
             <option value="production">production</option>
             <option value="development">development</option>
             <option value="sandbox">sandbox</option>
           </select>
         </div>
-
-        <div style={{ marginBottom: "12px" }}>
-          <label style={{ display: "block", marginBottom: "4px", fontWeight: 500 }}>OpenAI (optional)</label>
-          <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-            <input
-              type="checkbox"
-              checked={openaiEnabled}
-              onChange={(e) => setOpenaiEnabled(e.target.checked)}
-              style={{ width: "18px", height: "18px" }}
-            />
-            <span style={{ color: "hsl(var(--muted-foreground))" }}>Enable OpenAI council vote</span>
-          </div>
-        </div>
-        {openaiEnabled && (
-          <>
-            <div style={{ marginBottom: "12px" }}>
-              <label style={{ display: "block", marginBottom: "4px", fontWeight: 500 }}>OpenAI API Key</label>
-              <input
-                className="plain-input"
-                type="password"
-                autoCapitalize="none"
-                autoCorrect="off"
-                spellCheck={false}
-                value={openaiApiKey}
-                onChange={(e) => setOpenaiApiKey(e.target.value)}
-                placeholder="Paste or type your OpenAI API key"
-              />
-            </div>
-            <div style={{ marginBottom: "12px" }}>
-              <label style={{ display: "block", marginBottom: "4px", fontWeight: 500 }}>OpenAI Model</label>
-              <input className="plain-input" value={openaiModel} onChange={(e) => setOpenaiModel(e.target.value)} />
-            </div>
-          </>
-        )}
 
         {validationError && (
           <div style={{
@@ -328,24 +266,15 @@ export default function Settings() {
           onClick={async () => {
             setValidationError(null);
             
-            // Validate inputs
             const validationResult = apiKeysSchema.safeParse({
               krakenKey,
               krakenSecret,
               plaidClientId,
               plaidSecret,
-              openaiEnabled,
-              openaiApiKey,
             });
             
             if (!validationResult.success) {
               setValidationError(validationResult.error.errors[0]?.message || "Validation failed");
-              return;
-            }
-            
-            // Check if OpenAI is enabled but no key provided
-            if (openaiEnabled && !openaiApiKey.trim()) {
-              setValidationError("OpenAI API key is required when OpenAI is enabled");
               return;
             }
             
@@ -357,7 +286,6 @@ export default function Settings() {
             }
             setSubmitting(true);
             try {
-              // Prefer Supabase Edge Function so you don't need a separate backend server.
               const { data: resp, error } = await supabase.functions.invoke("bot-actions", {
                 body: {
                   action: "set_keys",
@@ -366,9 +294,6 @@ export default function Settings() {
                   plaid_client_id: plaidClientId.trim() || null,
                   plaid_secret: plaidSecret.trim() || null,
                   plaid_env: plaidEnv,
-                  openai_enabled: openaiEnabled,
-                  openai_api_key: openaiApiKey.trim() || null,
-                  openai_model: openaiModel,
                 },
               });
               if (error) {
@@ -376,12 +301,11 @@ export default function Settings() {
               } else if (resp?.error) {
                 toast({ title: "Failed", description: String(resp.error), variant: "destructive" });
               } else {
-                toast({ title: "Saved", description: "Keys stored in Supabase for bot tick." });
+                toast({ title: "Saved", description: "Keys stored securely." });
                 setKrakenKey("");
                 setKrakenSecret("");
                 setPlaidClientId("");
                 setPlaidSecret("");
-                setOpenaiApiKey("");
                 // Refresh status
                 const { data: statusData } = await supabase.functions.invoke("bot-actions", {
                   body: { action: "status" },
@@ -394,7 +318,7 @@ export default function Settings() {
           }}
           style={{ fontWeight: 600 }}
         >
-          {submitting ? "Sending..." : "Send to Backend"}
+          {submitting ? "Saving..." : "Save Keys"}
         </button>
       </div>
 
@@ -404,7 +328,7 @@ export default function Settings() {
         </h2>
         <div style={{ marginBottom: "12px" }}>
           <label style={{ display: "block", marginBottom: "4px", fontWeight: 500 }}>
-            Kraken Withdraw Asset (default: ZUSD)
+            Withdraw Asset (default: ZUSD)
           </label>
           <input
             className="plain-input"
@@ -415,21 +339,30 @@ export default function Settings() {
         </div>
         <div style={{ marginBottom: "12px" }}>
           <label style={{ display: "block", marginBottom: "4px", fontWeight: 500 }}>
-            Kraken Withdraw Key (to your Chime/bank)
+            Kraken Withdraw Key
           </label>
           <input
             className="plain-input"
             value={krakenWithdrawKey}
             onChange={(e) => setKrakenWithdrawKey(e.target.value)}
-            placeholder="(paste your Kraken withdrawal key)"
+            placeholder="Your Kraken withdrawal key"
           />
         </div>
-        <p style={{ color: "hsl(var(--muted-foreground))", fontSize: "0.9rem" }}>
-          This is stored on your device (local storage). The backend will still require
-          <code> KRAKEN_ENABLE_WITHDRAWALS=true</code>.
+        <button
+          className="plain-button"
+          onClick={() => {
+            setKrakenWithdrawKeyUsd(krakenWithdrawKey);
+            setKrakenWithdrawAsset(krakenWithdrawAsset);
+            toast({ title: "Saved", description: "Withdrawal settings saved locally." });
+          }}
+          style={{ fontWeight: 600 }}
+        >
+          Save Withdrawal Settings
+        </button>
+        <p style={{ color: "hsl(var(--muted-foreground))", fontSize: "0.85rem", marginTop: "8px" }}>
+          Stored on your device. Requires KRAKEN_ENABLE_WITHDRAWALS=true on backend.
         </p>
       </div>
     </div>
   );
 }
-
