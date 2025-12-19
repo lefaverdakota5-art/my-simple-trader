@@ -13,10 +13,8 @@ import {
   setKrakenWithdrawKeyUsd,
 } from "@/lib/botApi";
 
-// Validation schema - at least one pair of keys required
+// Validation schema - Kraken is primary, others optional
 const apiKeysSchema = z.object({
-  alpacaKey: z.string().trim(),
-  alpacaSecret: z.string().trim(),
   krakenKey: z.string().trim(),
   krakenSecret: z.string().trim(),
   plaidClientId: z.string().trim(),
@@ -25,16 +23,12 @@ const apiKeysSchema = z.object({
   openaiApiKey: z.string().trim(),
 }).refine(
   (data) => {
-    const hasAlpaca = data.alpacaKey.length > 0 && data.alpacaSecret.length > 0;
     const hasKraken = data.krakenKey.length > 0 && data.krakenSecret.length > 0;
     const hasPlaid = data.plaidClientId.length > 0 && data.plaidSecret.length > 0;
     const hasOpenai = !data.openaiEnabled || data.openaiApiKey.length > 0;
-    // Valid if at least one integration is complete OR no fields filled (just updating settings)
-    const hasAnyPair = hasAlpaca || hasKraken || hasPlaid;
-    const partialAlpaca = (data.alpacaKey.length > 0) !== (data.alpacaSecret.length > 0);
     const partialKraken = (data.krakenKey.length > 0) !== (data.krakenSecret.length > 0);
     const partialPlaid = (data.plaidClientId.length > 0) !== (data.plaidSecret.length > 0);
-    return !partialAlpaca && !partialKraken && !partialPlaid && hasOpenai;
+    return !partialKraken && !partialPlaid && hasOpenai;
   },
   { message: "Please provide both key and secret for each integration, or leave both empty" }
 );
@@ -46,8 +40,6 @@ export default function Settings() {
   const [botUrl, setBotUrl] = useState("");
   const [krakenWithdrawKey, setKrakenWithdrawKey] = useState("");
   const [krakenWithdrawAsset, setKrakenWithdrawAssetState] = useState("ZUSD");
-  const [alpacaKey, setAlpacaKey] = useState("");
-  const [alpacaSecret, setAlpacaSecret] = useState("");
   const [krakenKey, setKrakenKey] = useState("");
   const [krakenSecret, setKrakenSecret] = useState("");
   const [plaidClientId, setPlaidClientId] = useState("");
@@ -58,7 +50,6 @@ export default function Settings() {
   const [openaiModel, setOpenaiModel] = useState("gpt-4o-mini");
   const [submitting, setSubmitting] = useState(false);
   const [status, setStatus] = useState<{
-    alpacaOk?: boolean;
     krakenOk?: boolean;
     plaidOk?: boolean;
     openaiOk?: boolean;
@@ -205,17 +196,14 @@ export default function Settings() {
             background: "hsl(var(--muted))",
             borderRadius: "8px"
           }}>
-            <span style={{ color: status.alpacaOk ? "hsl(142, 76%, 36%)" : "hsl(var(--muted-foreground))" }}>
-              {status.alpacaOk ? "✓" : "○"} Alpaca
-            </span>
             <span style={{ color: status.krakenOk ? "hsl(142, 76%, 36%)" : "hsl(var(--muted-foreground))" }}>
-              {status.krakenOk ? "✓" : "○"} Kraken
+              {status.krakenOk ? "✓" : "○"} Kraken (Trading)
             </span>
             <span style={{ color: status.plaidOk ? "hsl(142, 76%, 36%)" : "hsl(var(--muted-foreground))" }}>
-              {status.plaidOk ? "✓" : "○"} Plaid
+              {status.plaidOk ? "✓" : "○"} Plaid (Banking)
             </span>
             <span style={{ color: status.openaiOk ? "hsl(142, 76%, 36%)" : "hsl(var(--muted-foreground))" }}>
-              {status.openaiOk ? "✓" : "○"} OpenAI
+              {status.openaiOk ? "✓" : "○"} OpenAI (AI Council)
             </span>
           </div>
         )}
@@ -223,33 +211,6 @@ export default function Settings() {
         <p style={{ color: "hsl(var(--muted-foreground))", fontSize: "0.9rem", marginBottom: "12px" }}>
           Enter or paste your API keys directly into the text fields below, then press “Send to Backend”. Keys are stored in Supabase for the bot.
         </p>
-
-        <div style={{ marginBottom: "12px" }}>
-          <label style={{ display: "block", marginBottom: "4px", fontWeight: 500 }}>Alpaca API Key</label>
-          <input
-            className="plain-input"
-            type="text"
-            autoCapitalize="none"
-            autoCorrect="off"
-            spellCheck={false}
-            value={alpacaKey}
-            onChange={(e) => setAlpacaKey(e.target.value)}
-            placeholder="Paste or type your Alpaca API key"
-          />
-        </div>
-        <div style={{ marginBottom: "12px" }}>
-          <label style={{ display: "block", marginBottom: "4px", fontWeight: 500 }}>Alpaca Secret</label>
-          <input
-            className="plain-input"
-            type="password"
-            autoCapitalize="none"
-            autoCorrect="off"
-            spellCheck={false}
-            value={alpacaSecret}
-            onChange={(e) => setAlpacaSecret(e.target.value)}
-            placeholder="Paste or type your Alpaca secret"
-          />
-        </div>
 
         <div style={{ marginBottom: "12px" }}>
           <label style={{ display: "block", marginBottom: "4px", fontWeight: 500 }}>Kraken API Key</label>
@@ -369,8 +330,6 @@ export default function Settings() {
             
             // Validate inputs
             const validationResult = apiKeysSchema.safeParse({
-              alpacaKey,
-              alpacaSecret,
               krakenKey,
               krakenSecret,
               plaidClientId,
@@ -402,8 +361,6 @@ export default function Settings() {
               const { data: resp, error } = await supabase.functions.invoke("bot-actions", {
                 body: {
                   action: "set_keys",
-                  alpaca_api_key: alpacaKey.trim() || null,
-                  alpaca_secret: alpacaSecret.trim() || null,
                   kraken_key: krakenKey.trim() || null,
                   kraken_secret: krakenSecret.trim() || null,
                   plaid_client_id: plaidClientId.trim() || null,
@@ -420,8 +377,6 @@ export default function Settings() {
                 toast({ title: "Failed", description: String(resp.error), variant: "destructive" });
               } else {
                 toast({ title: "Saved", description: "Keys stored in Supabase for bot tick." });
-                setAlpacaKey("");
-                setAlpacaSecret("");
                 setKrakenKey("");
                 setKrakenSecret("");
                 setPlaidClientId("");
