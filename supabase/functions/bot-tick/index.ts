@@ -32,6 +32,29 @@ async function krakenPctChange(pair: string): Promise<number> {
   return (last / open - 1) * 100;
 }
 
+async function krakenOHLC(pair: string): Promise<{ high: number; low: number; volume: number }> {
+  try {
+    const r = await fetch(`https://api.kraken.com/0/public/OHLC?pair=${encodeURIComponent(pair)}&interval=60`);
+    const data = await r.json() as { result?: Record<string, unknown[][]> };
+    if (!data.result) return { high: 0, low: 0, volume: 0 };
+    const ohlc = Object.values(data.result).find(v => Array.isArray(v) && v.length > 0) as unknown[][] | undefined;
+    if (!ohlc || ohlc.length < 24) return { high: 0, low: 0, volume: 0 };
+    
+    const last24 = ohlc.slice(-24);
+    const highs = last24.map(c => Number(c[2] || 0));
+    const lows = last24.map(c => Number(c[3] || 0));
+    const volumes = last24.map(c => Number(c[6] || 0));
+    
+    return {
+      high: Math.max(...highs),
+      low: Math.min(...lows.filter(l => l > 0)),
+      volume: volumes.reduce((a, b) => a + b, 0),
+    };
+  } catch {
+    return { high: 0, low: 0, volume: 0 };
+  }
+}
+
 function council(pct: number, ordersLeft: boolean) {
   const ai1 = pct > 0.1;
   const ai2 = pct > 0.05;
@@ -50,12 +73,11 @@ function council(pct: number, ordersLeft: boolean) {
   return { votes: `${yes}/5`, reasons, approved: yes >= 4 };
 }
 
-// Top Trader Analyst - Uses Lovable AI to analyze what profitable traders would do
-async function topTraderAnalystVote(opts: {
-  pct: number;
-  krakenPair: string;
-  symbol: string;
-  ordersLeft: boolean;
+// Generic AI vote helper
+async function lovableAiVote(opts: {
+  name: string;
+  systemPrompt: string;
+  userPrompt: string;
 }): Promise<{ vote: boolean; reason: string } | null> {
   const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
   if (!LOVABLE_API_KEY) return null;
@@ -64,16 +86,6 @@ async function topTraderAnalystVote(opts: {
     const controller = new AbortController();
     const t = setTimeout(() => controller.abort(), 10000);
 
-    const prompt = `You are the "Top Trader Analyst" - an AI that studies strategies of the world's most profitable traders like Warren Buffett, Ray Dalio, Cathie Wood, and top crypto whales.
-
-Market Data:
-- Asset: ${opts.symbol} (Crypto: ${opts.krakenPair})
-- Today's price change: ${opts.pct.toFixed(2)}%
-- Can place orders: ${opts.ordersLeft ? "Yes" : "No"}
-
-Based on what top traders typically do, should we BUY now?
-Respond with ONLY JSON: {"vote":"YES" or "NO","reason":"Brief reason (max 50 chars)"}`;
-
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
       signal: controller.signal,
@@ -81,8 +93,8 @@ Respond with ONLY JSON: {"vote":"YES" or "NO","reason":"Brief reason (max 50 cha
       body: JSON.stringify({
         model: "google/gemini-2.5-flash",
         messages: [
-          { role: "system", content: "You emulate top trader strategies. Respond with valid JSON only." },
-          { role: "user", content: prompt },
+          { role: "system", content: opts.systemPrompt },
+          { role: "user", content: opts.userPrompt },
         ],
         max_tokens: 80,
       }),
@@ -101,9 +113,31 @@ Respond with ONLY JSON: {"vote":"YES" or "NO","reason":"Brief reason (max 50 cha
     if (!parsed?.vote) return null;
     return { vote: String(parsed.vote).toUpperCase() === "YES", reason: (parsed.reason || "").slice(0, 50) };
   } catch (e) {
-    console.log(`[top-trader-analyst] Error: ${e instanceof Error ? e.message : "unknown"}`);
+    console.log(`[${opts.name}] Error: ${e instanceof Error ? e.message : "unknown"}`);
     return null;
   }
+}
+
+// Top Trader Analyst - Uses Lovable AI to analyze what profitable traders would do
+async function topTraderAnalystVote(opts: {
+  pct: number;
+  krakenPair: string;
+  symbol: string;
+  ordersLeft: boolean;
+}): Promise<{ vote: boolean; reason: string } | null> {
+  return lovableAiVote({
+    name: "top-trader-analyst",
+    systemPrompt: "You emulate top trader strategies. Respond with valid JSON only.",
+    userPrompt: `You are the "Top Trader Analyst" - an AI that studies strategies of the world's most profitable traders like Warren Buffett, Ray Dalio, Cathie Wood, and top crypto whales.
+
+Market Data:
+- Asset: ${opts.symbol} (Crypto: ${opts.krakenPair})
+- Today's price change: ${opts.pct.toFixed(2)}%
+- Can place orders: ${opts.ordersLeft ? "Yes" : "No"}
+
+Based on what top traders typically do, should we BUY now?
+Respond with ONLY JSON: {"vote":"YES" or "NO","reason":"Brief reason (max 50 chars)"}`,
+  });
 }
 
 // News Sentiment AI - Analyzes current market news sentiment
@@ -113,14 +147,10 @@ async function newsSentimentVote(opts: {
   symbol: string;
   ordersLeft: boolean;
 }): Promise<{ vote: boolean; reason: string } | null> {
-  const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-  if (!LOVABLE_API_KEY) return null;
-
-  try {
-    const controller = new AbortController();
-    const t = setTimeout(() => controller.abort(), 10000);
-
-    const prompt = `You are "News Sentiment AI" - an expert at analyzing market news and social sentiment for trading decisions.
+  return lovableAiVote({
+    name: "news-sentiment",
+    systemPrompt: "You analyze market sentiment. Respond with valid JSON only.",
+    userPrompt: `You are "News Sentiment AI" - an expert at analyzing market news and social sentiment for trading decisions.
 
 Market Data:
 - Asset: ${opts.symbol} (Crypto: ${opts.krakenPair})
@@ -133,38 +163,8 @@ Based on typical market sentiment patterns:
 - High volatility (>2%) suggests uncertain sentiment
 
 Analyze the implied sentiment and recommend: should we BUY?
-Respond with ONLY JSON: {"vote":"YES" or "NO","reason":"Brief sentiment analysis (max 50 chars)"}`;
-
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      signal: controller.signal,
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${LOVABLE_API_KEY}` },
-      body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
-        messages: [
-          { role: "system", content: "You analyze market sentiment. Respond with valid JSON only." },
-          { role: "user", content: prompt },
-        ],
-        max_tokens: 80,
-      }),
-    });
-    clearTimeout(t);
-    if (!response.ok) return null;
-
-    const data = await response.json();
-    const content = data?.choices?.[0]?.message?.content || "";
-    let jsonStr = content.trim();
-    if (jsonStr.includes("```")) {
-      const match = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
-      if (match) jsonStr = match[1].trim();
-    }
-    const parsed = JSON.parse(jsonStr) as { vote?: string; reason?: string };
-    if (!parsed?.vote) return null;
-    return { vote: String(parsed.vote).toUpperCase() === "YES", reason: (parsed.reason || "").slice(0, 50) };
-  } catch (e) {
-    console.log(`[news-sentiment] Error: ${e instanceof Error ? e.message : "unknown"}`);
-    return null;
-  }
+Respond with ONLY JSON: {"vote":"YES" or "NO","reason":"Brief sentiment analysis (max 50 chars)"}`,
+  });
 }
 
 // Whale Tracker AI - Tracks large holder movements
@@ -174,14 +174,10 @@ async function whaleTrackerVote(opts: {
   symbol: string;
   ordersLeft: boolean;
 }): Promise<{ vote: boolean; reason: string } | null> {
-  const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-  if (!LOVABLE_API_KEY) return null;
-
-  try {
-    const controller = new AbortController();
-    const t = setTimeout(() => controller.abort(), 10000);
-
-    const prompt = `You are "Whale Tracker AI" - an expert at predicting large institutional and whale trader behavior in crypto and stocks.
+  return lovableAiVote({
+    name: "whale-tracker",
+    systemPrompt: "You predict whale trader behavior. Respond with valid JSON only.",
+    userPrompt: `You are "Whale Tracker AI" - an expert at predicting large institutional and whale trader behavior in crypto and stocks.
 
 Market Data:
 - Asset: ${opts.symbol} (Crypto: ${opts.krakenPair})
@@ -195,38 +191,8 @@ Whale behavior patterns to consider:
 - Large holders prefer stable prices for accumulation
 
 Based on whale behavior patterns, should we BUY?
-Respond with ONLY JSON: {"vote":"YES" or "NO","reason":"Brief whale analysis (max 50 chars)"}`;
-
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      signal: controller.signal,
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${LOVABLE_API_KEY}` },
-      body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
-        messages: [
-          { role: "system", content: "You predict whale trader behavior. Respond with valid JSON only." },
-          { role: "user", content: prompt },
-        ],
-        max_tokens: 80,
-      }),
-    });
-    clearTimeout(t);
-    if (!response.ok) return null;
-
-    const data = await response.json();
-    const content = data?.choices?.[0]?.message?.content || "";
-    let jsonStr = content.trim();
-    if (jsonStr.includes("```")) {
-      const match = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
-      if (match) jsonStr = match[1].trim();
-    }
-    const parsed = JSON.parse(jsonStr) as { vote?: string; reason?: string };
-    if (!parsed?.vote) return null;
-    return { vote: String(parsed.vote).toUpperCase() === "YES", reason: (parsed.reason || "").slice(0, 50) };
-  } catch (e) {
-    console.log(`[whale-tracker] Error: ${e instanceof Error ? e.message : "unknown"}`);
-    return null;
-  }
+Respond with ONLY JSON: {"vote":"YES" or "NO","reason":"Brief whale analysis (max 50 chars)"}`,
+  });
 }
 
 // DeFi Protocol AI - Analyzes on-chain metrics and TVL data
@@ -236,14 +202,10 @@ async function defiProtocolVote(opts: {
   symbol: string;
   ordersLeft: boolean;
 }): Promise<{ vote: boolean; reason: string } | null> {
-  const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-  if (!LOVABLE_API_KEY) return null;
-
-  try {
-    const controller = new AbortController();
-    const t = setTimeout(() => controller.abort(), 10000);
-
-    const prompt = `You are "DeFi Protocol AI" - an expert at analyzing on-chain metrics, Total Value Locked (TVL), protocol activity, and DeFi ecosystem health.
+  return lovableAiVote({
+    name: "defi-protocol",
+    systemPrompt: "You analyze DeFi protocols and on-chain metrics. Respond with valid JSON only.",
+    userPrompt: `You are "DeFi Protocol AI" - an expert at analyzing on-chain metrics, Total Value Locked (TVL), protocol activity, and DeFi ecosystem health.
 
 Market Data:
 - Asset: ${opts.symbol} (Crypto: ${opts.krakenPair})
@@ -254,44 +216,268 @@ On-chain and DeFi metrics to analyze:
 - Rising TVL typically indicates growing ecosystem confidence
 - High protocol activity suggests healthy demand
 - Stable or growing TVL during price dips = accumulation opportunity
-- Declining TVL with price drops = potential weakness
-- Cross-chain liquidity flows can signal market direction
 - DEX volume spikes often precede volatility
-- Lending protocol utilization rates indicate leverage sentiment
 
 Based on typical DeFi protocol patterns and on-chain metrics, should we BUY?
-Respond with ONLY JSON: {"vote":"YES" or "NO","reason":"Brief DeFi analysis (max 50 chars)"}`;
+Respond with ONLY JSON: {"vote":"YES" or "NO","reason":"Brief DeFi analysis (max 50 chars)"}`,
+  });
+}
 
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      signal: controller.signal,
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${LOVABLE_API_KEY}` },
-      body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
-        messages: [
-          { role: "system", content: "You analyze DeFi protocols and on-chain metrics. Respond with valid JSON only." },
-          { role: "user", content: prompt },
-        ],
-        max_tokens: 80,
-      }),
-    });
-    clearTimeout(t);
-    if (!response.ok) return null;
+// Contrarian Analyst - Goes against the crowd
+async function contrarianAnalystVote(opts: {
+  pct: number;
+  krakenPair: string;
+  symbol: string;
+  ordersLeft: boolean;
+}): Promise<{ vote: boolean; reason: string } | null> {
+  return lovableAiVote({
+    name: "contrarian-analyst",
+    systemPrompt: "You are a contrarian trader who profits by going against the crowd. Respond with valid JSON only.",
+    userPrompt: `You are "Contrarian Analyst" - an expert at finding profitable opportunities when the crowd is wrong.
 
-    const data = await response.json();
-    const content = data?.choices?.[0]?.message?.content || "";
-    let jsonStr = content.trim();
-    if (jsonStr.includes("```")) {
-      const match = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
-      if (match) jsonStr = match[1].trim();
-    }
-    const parsed = JSON.parse(jsonStr) as { vote?: string; reason?: string };
-    if (!parsed?.vote) return null;
-    return { vote: String(parsed.vote).toUpperCase() === "YES", reason: (parsed.reason || "").slice(0, 50) };
-  } catch (e) {
-    console.log(`[defi-protocol] Error: ${e instanceof Error ? e.message : "unknown"}`);
-    return null;
-  }
+Market Data:
+- Asset: ${opts.symbol} (Crypto: ${opts.krakenPair})
+- Today's price change: ${opts.pct.toFixed(2)}%
+- Can place orders: ${opts.ordersLeft ? "Yes" : "No"}
+
+Contrarian principles:
+- When everyone is fearful (big drops), be greedy
+- When everyone is greedy (big pumps), be fearful
+- Extreme movements often reverse
+- Oversold conditions (>-3%) can be buying opportunities
+- Overbought conditions (>+3%) warrant caution
+
+Based on contrarian trading principles, should we BUY?
+Respond with ONLY JSON: {"vote":"YES" or "NO","reason":"Brief contrarian analysis (max 50 chars)"}`,
+  });
+}
+
+// Grid Trading Bot AI - Analyzes grid trading opportunities
+async function gridTradingBotVote(opts: {
+  pct: number;
+  krakenPair: string;
+  symbol: string;
+  ordersLeft: boolean;
+  ohlc: { high: number; low: number; volume: number };
+}): Promise<{ vote: boolean; reason: string } | null> {
+  const range = opts.ohlc.high > 0 && opts.ohlc.low > 0 
+    ? ((opts.ohlc.high - opts.ohlc.low) / opts.ohlc.low * 100).toFixed(2) 
+    : "unknown";
+  
+  return lovableAiVote({
+    name: "grid-trading-bot",
+    systemPrompt: "You are a grid trading expert. Respond with valid JSON only.",
+    userPrompt: `You are "Grid Trading Bot" - an expert at automated grid trading strategies that profit from market volatility.
+
+Market Data:
+- Asset: ${opts.symbol} (Crypto: ${opts.krakenPair})
+- Today's price change: ${opts.pct.toFixed(2)}%
+- 24h Range: ${range}%
+- 24h High: $${opts.ohlc.high.toFixed(2)}
+- 24h Low: $${opts.ohlc.low.toFixed(2)}
+- Can place orders: ${opts.ordersLeft ? "Yes" : "No"}
+
+Grid trading principles:
+- Best in ranging/sideways markets (0.5%-3% daily range)
+- Place buy orders at lower grid levels
+- Too much volatility (>5%) is risky for grids
+- Stable volume is preferred
+- Current price near lows = good entry for grid
+
+Based on grid trading analysis, should we place a BUY order?
+Respond with ONLY JSON: {"vote":"YES" or "NO","reason":"Brief grid analysis (max 50 chars)"}`,
+  });
+}
+
+// Scalping Bot AI - Quick small profit analysis
+async function scalpingBotVote(opts: {
+  pct: number;
+  krakenPair: string;
+  symbol: string;
+  ordersLeft: boolean;
+  ohlc: { high: number; low: number; volume: number };
+}): Promise<{ vote: boolean; reason: string } | null> {
+  return lovableAiVote({
+    name: "scalping-bot",
+    systemPrompt: "You are a scalping expert focused on quick small profits. Respond with valid JSON only.",
+    userPrompt: `You are "Scalping Bot" - an expert at making quick small profits from tiny price movements.
+
+Market Data:
+- Asset: ${opts.symbol} (Crypto: ${opts.krakenPair})
+- Today's price change: ${opts.pct.toFixed(2)}%
+- 24h Volume: ${opts.ohlc.volume.toFixed(2)}
+- Can place orders: ${opts.ordersLeft ? "Yes" : "No"}
+
+Scalping principles:
+- Need high liquidity and volume
+- Small price movements (0.1%-0.5%) are targets
+- Low volatility periods are ideal
+- Quick entry and exit
+- Avoid during high volatility (>2%)
+- Best when momentum is slightly positive
+
+Based on scalping analysis, should we BUY for a quick scalp?
+Respond with ONLY JSON: {"vote":"YES" or "NO","reason":"Brief scalping analysis (max 50 chars)"}`,
+  });
+}
+
+// Mean Reversion Bot AI - Analyzes reversion opportunities
+async function meanReversionBotVote(opts: {
+  pct: number;
+  krakenPair: string;
+  symbol: string;
+  ordersLeft: boolean;
+  ohlc: { high: number; low: number; volume: number };
+}): Promise<{ vote: boolean; reason: string } | null> {
+  const midpoint = opts.ohlc.high > 0 && opts.ohlc.low > 0 
+    ? ((opts.ohlc.high + opts.ohlc.low) / 2).toFixed(2) 
+    : "unknown";
+  
+  return lovableAiVote({
+    name: "mean-reversion-bot",
+    systemPrompt: "You are a mean reversion trading expert. Respond with valid JSON only.",
+    userPrompt: `You are "Mean Reversion Bot" - an expert at trading based on price returning to its average.
+
+Market Data:
+- Asset: ${opts.symbol} (Crypto: ${opts.krakenPair})
+- Today's price change: ${opts.pct.toFixed(2)}%
+- 24h High: $${opts.ohlc.high.toFixed(2)}
+- 24h Low: $${opts.ohlc.low.toFixed(2)}
+- 24h Midpoint: $${midpoint}
+- Can place orders: ${opts.ordersLeft ? "Yes" : "No"}
+
+Mean reversion principles:
+- Prices tend to return to their average
+- Oversold (price below midpoint, negative pct) = buy opportunity
+- Extreme deviations (>2%) often reverse
+- Best when price is significantly below average
+- Avoid when strong trend is forming
+
+Based on mean reversion analysis, should we BUY?
+Respond with ONLY JSON: {"vote":"YES" or "NO","reason":"Brief mean reversion analysis (max 50 chars)"}`,
+  });
+}
+
+// Fear & Greed Index AI - Market sentiment extremes
+async function fearGreedIndexVote(opts: {
+  pct: number;
+  krakenPair: string;
+  symbol: string;
+  ordersLeft: boolean;
+}): Promise<{ vote: boolean; reason: string } | null> {
+  return lovableAiVote({
+    name: "fear-greed-index",
+    systemPrompt: "You analyze market fear and greed sentiment. Respond with valid JSON only.",
+    userPrompt: `You are "Fear & Greed Index AI" - an expert at measuring market emotion extremes.
+
+Market Data:
+- Asset: ${opts.symbol} (Crypto: ${opts.krakenPair})
+- Today's price change: ${opts.pct.toFixed(2)}%
+- Can place orders: ${opts.ordersLeft ? "Yes" : "No"}
+
+Fear & Greed indicators:
+- Large drops (>-3%) indicate EXTREME FEAR → potential buy
+- Large gains (>+3%) indicate EXTREME GREED → potential overextension
+- Neutral range (-1% to +1%) → balanced sentiment
+- Moderate fear (-1% to -3%) → opportunity zone
+- Moderate greed (+1% to +3%) → caution zone
+
+Current sentiment estimate based on price action.
+
+Based on fear & greed analysis, should we BUY?
+Respond with ONLY JSON: {"vote":"YES" or "NO","reason":"Brief fear/greed analysis (max 50 chars)"}`,
+  });
+}
+
+// Macro Economist AI - Macro economic trends
+async function macroEconomistVote(opts: {
+  pct: number;
+  krakenPair: string;
+  symbol: string;
+  ordersLeft: boolean;
+}): Promise<{ vote: boolean; reason: string } | null> {
+  return lovableAiVote({
+    name: "macro-economist",
+    systemPrompt: "You are a macro economist analyzing global economic conditions. Respond with valid JSON only.",
+    userPrompt: `You are "Macro Economist AI" - an expert at analyzing macro economic conditions affecting crypto and stocks.
+
+Market Data:
+- Asset: ${opts.symbol} (Crypto: ${opts.krakenPair})
+- Today's price change: ${opts.pct.toFixed(2)}%
+- Can place orders: ${opts.ordersLeft ? "Yes" : "No"}
+
+Macro considerations:
+- Risk-on environments favor crypto (positive correlation with stocks)
+- High inflation periods historically favor BTC as hedge
+- Liquidity conditions affect all risk assets
+- Dollar strength inversely affects crypto
+- Positive momentum often signals improving macro sentiment
+
+Based on macro economic analysis, should we BUY?
+Respond with ONLY JSON: {"vote":"YES" or "NO","reason":"Brief macro analysis (max 50 chars)"}`,
+  });
+}
+
+// DCA Bot AI - Dollar cost averaging analysis
+async function dcaBotVote(opts: {
+  pct: number;
+  krakenPair: string;
+  symbol: string;
+  ordersLeft: boolean;
+}): Promise<{ vote: boolean; reason: string } | null> {
+  return lovableAiVote({
+    name: "dca-bot",
+    systemPrompt: "You are a DCA (dollar cost averaging) expert. Respond with valid JSON only.",
+    userPrompt: `You are "DCA Bot" - an expert at systematic dollar cost averaging strategies.
+
+Market Data:
+- Asset: ${opts.symbol} (Crypto: ${opts.krakenPair})
+- Today's price change: ${opts.pct.toFixed(2)}%
+- Can place orders: ${opts.ordersLeft ? "Yes" : "No"}
+
+DCA principles:
+- Consistent buying regardless of price (time in market > timing market)
+- Lower prices = buying more units for same dollar amount
+- Dips (<0%) are actually GOOD for DCA (better average)
+- Avoid only in extreme pumps (>5%) where you get fewer units
+- Long-term accumulation strategy
+
+Based on DCA strategy, should we execute regular BUY?
+Respond with ONLY JSON: {"vote":"YES" or "NO","reason":"Brief DCA analysis (max 50 chars)"}`,
+  });
+}
+
+// Momentum Breakout Bot AI - Breakout trading analysis
+async function momentumBreakoutVote(opts: {
+  pct: number;
+  krakenPair: string;
+  symbol: string;
+  ordersLeft: boolean;
+  ohlc: { high: number; low: number; volume: number };
+}): Promise<{ vote: boolean; reason: string } | null> {
+  return lovableAiVote({
+    name: "momentum-breakout",
+    systemPrompt: "You are a momentum breakout trading expert. Respond with valid JSON only.",
+    userPrompt: `You are "Momentum Breakout Bot" - an expert at catching strong momentum moves and breakouts.
+
+Market Data:
+- Asset: ${opts.symbol} (Crypto: ${opts.krakenPair})
+- Today's price change: ${opts.pct.toFixed(2)}%
+- 24h High: $${opts.ohlc.high.toFixed(2)}
+- 24h Low: $${opts.ohlc.low.toFixed(2)}
+- 24h Volume: ${opts.ohlc.volume.toFixed(2)}
+- Can place orders: ${opts.ordersLeft ? "Yes" : "No"}
+
+Breakout principles:
+- Strong momentum (>1%) with volume = potential breakout
+- Price near 24h highs with momentum = bullish breakout
+- Consolidation before breakout (low range) is ideal
+- High volume confirms breakout validity
+- Avoid false breakouts (quick reversal patterns)
+
+Based on breakout analysis, should we BUY the momentum?
+Respond with ONLY JSON: {"vote":"YES" or "NO","reason":"Brief breakout analysis (max 50 chars)"}`,
+  });
 }
 
 async function openaiVote(opts: {
@@ -492,7 +678,12 @@ serve(async (req) => {
     if (!users.length) return jsonResponse({ success: true, processed: 0 });
 
     const today = new Date().toISOString().slice(0, 10);
-    const pct = await krakenPctChange(krakenPair);
+    
+    // Fetch market data
+    const [pct, ohlc] = await Promise.all([
+      krakenPctChange(krakenPair),
+      krakenOHLC(krakenPair),
+    ]);
 
     const results: Array<{ user_id: string; status: string; detail?: string }> = [];
 
@@ -534,44 +725,63 @@ serve(async (req) => {
       let totalMembers = 5;
       let yesVotes = Number(String(c.votes).split("/")[0] || "0");
 
-      // Run all AI analysts in parallel for speed (uses Lovable AI - no user config needed)
+      // Run ALL AI analysts in parallel for maximum speed (uses Lovable AI - no user config needed)
       const aiContext = { pct, krakenPair, symbol: defaultSymbol, ordersLeft };
-      const [topTraderVote, newsSentimentResult, whaleTrackerResult, defiProtocolResult] = await Promise.all([
+      const ohlcContext = { ...aiContext, ohlc };
+      
+      const [
+        topTraderVote,
+        newsSentimentResult,
+        whaleTrackerResult,
+        defiProtocolResult,
+        contrarianResult,
+        gridTradingResult,
+        scalpingResult,
+        meanReversionResult,
+        fearGreedResult,
+        macroEconomistResult,
+        dcaBotResult,
+        momentumBreakoutResult,
+      ] = await Promise.all([
         topTraderAnalystVote(aiContext),
         newsSentimentVote(aiContext),
         whaleTrackerVote(aiContext),
         defiProtocolVote(aiContext),
+        contrarianAnalystVote(aiContext),
+        gridTradingBotVote(ohlcContext),
+        scalpingBotVote(ohlcContext),
+        meanReversionBotVote(ohlcContext),
+        fearGreedIndexVote(aiContext),
+        macroEconomistVote(aiContext),
+        dcaBotVote(aiContext),
+        momentumBreakoutVote(ohlcContext),
       ]);
 
-      // Add Top Trader Analyst vote
-      if (topTraderVote) {
-        totalMembers++;
-        if (topTraderVote.vote) yesVotes++;
-        c.reasons.push(`${topTraderVote.vote ? "YES" : "NO"}: Top Trader Analyst • ${topTraderVote.reason}`);
+      // Add all AI votes
+      const aiVotes = [
+        { result: topTraderVote, name: "Top Trader Analyst" },
+        { result: newsSentimentResult, name: "News Sentiment AI" },
+        { result: whaleTrackerResult, name: "Whale Tracker AI" },
+        { result: defiProtocolResult, name: "DeFi Protocol AI" },
+        { result: contrarianResult, name: "Contrarian Analyst" },
+        { result: gridTradingResult, name: "Grid Trading Bot" },
+        { result: scalpingResult, name: "Scalping Bot" },
+        { result: meanReversionResult, name: "Mean Reversion Bot" },
+        { result: fearGreedResult, name: "Fear & Greed Index" },
+        { result: macroEconomistResult, name: "Macro Economist" },
+        { result: dcaBotResult, name: "DCA Bot" },
+        { result: momentumBreakoutResult, name: "Momentum Breakout" },
+      ];
+
+      for (const { result, name } of aiVotes) {
+        if (result) {
+          totalMembers++;
+          if (result.vote) yesVotes++;
+          c.reasons.push(`${result.vote ? "YES" : "NO"}: ${name} • ${result.reason}`);
+        }
       }
 
-      // Add News Sentiment AI vote
-      if (newsSentimentResult) {
-        totalMembers++;
-        if (newsSentimentResult.vote) yesVotes++;
-        c.reasons.push(`${newsSentimentResult.vote ? "YES" : "NO"}: News Sentiment AI • ${newsSentimentResult.reason}`);
-      }
-
-      // Add Whale Tracker AI vote
-      if (whaleTrackerResult) {
-        totalMembers++;
-        if (whaleTrackerResult.vote) yesVotes++;
-        c.reasons.push(`${whaleTrackerResult.vote ? "YES" : "NO"}: Whale Tracker AI • ${whaleTrackerResult.reason}`);
-      }
-
-      // Add DeFi Protocol AI vote
-      if (defiProtocolResult) {
-        totalMembers++;
-        if (defiProtocolResult.vote) yesVotes++;
-        c.reasons.push(`${defiProtocolResult.vote ? "YES" : "NO"}: DeFi Protocol AI • ${defiProtocolResult.reason}`);
-      }
-
-      // Optional OpenAI extra vote (9th member if enabled)
+      // Optional OpenAI extra vote (if enabled)
       if (keys?.openai_enabled && keys?.openai_api_key) {
         const extra = await openaiVote({
           apiKey: String(keys.openai_api_key),
@@ -598,7 +808,7 @@ serve(async (req) => {
         p_user_id: userId,
         p_council_votes: c.votes,
         p_council_reasons: c.reasons,
-        p_trade_message: `Bot tick: ${krakenPair} ${pct.toFixed(2)}% • ${c.votes}`,
+        p_trade_message: `Bot tick: ${krakenPair} ${pct.toFixed(2)}% • ${c.votes} council vote`,
       });
 
       if (!c.approved || !ordersLeft) {
