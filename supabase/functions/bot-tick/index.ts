@@ -234,6 +234,141 @@ Respond with ONLY JSON: {"vote":"YES" or "NO","reason":"Pattern identified (max 
   });
 }
 
+// ============ STOCK-SPECIFIC AI ANALYSTS ============
+
+// Stock Fundamental Analyst - Analyzes P/E ratios, earnings, and valuation metrics
+async function stockFundamentalAnalystVote(opts: {
+  pct: number;
+  krakenPair: string;
+  symbol: string;
+  ordersLeft: boolean;
+  assetType?: string;
+}): Promise<{ vote: boolean; reason: string } | null> {
+  // Only run for stocks
+  if (opts.assetType !== "stock") return null;
+  
+  return lovableAiVote({
+    name: "stock-fundamental-analyst",
+    model: "google/gemini-2.5-pro",
+    systemPrompt: "You are a fundamental stock analyst expert in valuation metrics. Respond with valid JSON only.",
+    userPrompt: `You are "Stock Fundamental Analyst" - an expert at analyzing company fundamentals, P/E ratios, and earnings.
+
+Stock Data:
+- Symbol: ${opts.symbol} (${opts.krakenPair})
+- Today's price change: ${opts.pct.toFixed(2)}%
+- Can place orders: ${opts.ordersLeft ? "Yes" : "No"}
+
+Fundamental analysis framework:
+- Consider typical P/E ranges for the sector (Tech: 20-40, Value: 10-20)
+- Earnings growth expectations and recent reports
+- Revenue trends and profit margins
+- Price dips during good fundamentals = buying opportunity
+- Overextended rallies on weak fundamentals = avoid
+
+Based on fundamental analysis principles for ${opts.symbol}, should we BUY?
+Respond with ONLY JSON: {"vote":"YES" or "NO","reason":"Brief fundamental analysis (max 50 chars)"}`,
+  });
+}
+
+// Stock Earnings Analyst - Focuses on earnings growth and surprises
+async function stockEarningsAnalystVote(opts: {
+  pct: number;
+  krakenPair: string;
+  symbol: string;
+  ordersLeft: boolean;
+  assetType?: string;
+}): Promise<{ vote: boolean; reason: string } | null> {
+  if (opts.assetType !== "stock") return null;
+  
+  return lovableAiVote({
+    name: "stock-earnings-analyst",
+    model: "google/gemini-2.5-flash",
+    systemPrompt: "You are an earnings and growth analyst. Respond with valid JSON only.",
+    userPrompt: `You are "Stock Earnings Analyst" - an expert at analyzing earnings growth, EPS trends, and earnings surprises.
+
+Stock Data:
+- Symbol: ${opts.symbol} (${opts.krakenPair})
+- Today's price change: ${opts.pct.toFixed(2)}%
+- Can place orders: ${opts.ordersLeft ? "Yes" : "No"}
+
+Earnings analysis framework:
+- Positive earnings surprises often lead to continued momentum
+- Pre-earnings dips can be buying opportunities for strong companies
+- Post-earnings selloffs on beats may indicate profit-taking
+- YoY revenue and EPS growth trends matter
+- Guidance raises are bullish signals
+
+Based on typical earnings patterns for ${opts.symbol}, should we BUY?
+Respond with ONLY JSON: {"vote":"YES" or "NO","reason":"Brief earnings analysis (max 50 chars)"}`,
+  });
+}
+
+// Stock Sector Rotation Analyst - Analyzes sector trends and rotation
+async function stockSectorRotationVote(opts: {
+  pct: number;
+  krakenPair: string;
+  symbol: string;
+  ordersLeft: boolean;
+  assetType?: string;
+}): Promise<{ vote: boolean; reason: string } | null> {
+  if (opts.assetType !== "stock") return null;
+  
+  return lovableAiVote({
+    name: "stock-sector-rotation",
+    model: "google/gemini-2.5-flash",
+    systemPrompt: "You are a sector rotation and market cycle expert. Respond with valid JSON only.",
+    userPrompt: `You are "Sector Rotation Analyst" - an expert at identifying sector trends and optimal rotation timing.
+
+Stock Data:
+- Symbol: ${opts.symbol} (${opts.krakenPair})
+- Today's price change: ${opts.pct.toFixed(2)}%
+- Can place orders: ${opts.ordersLeft ? "Yes" : "No"}
+
+Sector rotation principles:
+- Tech outperforms in low-rate environments
+- Financials benefit from rising rates
+- Defensive sectors (utilities, healthcare) during uncertainty
+- Cyclicals (industrials, materials) in recovery phases
+- Current macro environment favors certain sectors
+
+Based on sector rotation analysis for ${opts.symbol}, should we BUY?
+Respond with ONLY JSON: {"vote":"YES" or "NO","reason":"Brief sector analysis (max 50 chars)"}`,
+  });
+}
+
+// Institutional Flow Analyst - Tracks institutional buying/selling patterns
+async function stockInstitutionalFlowVote(opts: {
+  pct: number;
+  krakenPair: string;
+  symbol: string;
+  ordersLeft: boolean;
+  assetType?: string;
+}): Promise<{ vote: boolean; reason: string } | null> {
+  if (opts.assetType !== "stock") return null;
+  
+  return lovableAiVote({
+    name: "stock-institutional-flow",
+    model: "google/gemini-2.5-flash",
+    systemPrompt: "You are an institutional flow and smart money expert. Respond with valid JSON only.",
+    userPrompt: `You are "Institutional Flow Analyst" - an expert at tracking hedge fund, mutual fund, and insider activity.
+
+Stock Data:
+- Symbol: ${opts.symbol} (${opts.krakenPair})
+- Today's price change: ${opts.pct.toFixed(2)}%
+- Can place orders: ${opts.ordersLeft ? "Yes" : "No"}
+
+Institutional flow analysis:
+- Insider buying is a strong bullish signal
+- 13F filings show institutional positioning
+- Dark pool activity can indicate accumulation
+- Options flow (unusual call buying) is bullish
+- High short interest with positive momentum = potential squeeze
+
+Based on typical institutional flow patterns for ${opts.symbol}, should we BUY?
+Respond with ONLY JSON: {"vote":"YES" or "NO","reason":"Brief institutional analysis (max 50 chars)"}`,
+  });
+}
+
 // Perplexity Real-Time News Search - Gets live market news for sentiment (stocks & crypto)
 async function perplexityNewsVote(opts: {
   pct: number;
@@ -1205,11 +1340,17 @@ serve(async (req) => {
       { pair: "ETHFIUSD", symbol: "ETHFI", name: "ether.fi", type: "crypto" },
       { pair: "ENAUSD", symbol: "ENA", name: "Ethena", type: "crypto" },
       
-      // ============ xSTOCKS - Tokenized US Stocks & ETFs (Kraken) ============
-      // Major ETFs
+      // ============ xSTOCKS - ALL Kraken Tokenized US Stocks & ETFs ============
+      // ETFs - Index Funds
       { pair: "SPYUSD", symbol: "SPY", name: "SPDR S&P 500 ETF Trust", type: "stock" },
-      { pair: "QQQUSD", symbol: "QQQ", name: "Invesco QQQ Trust", type: "stock" },
+      { pair: "QQQUSD", symbol: "QQQ", name: "Invesco QQQ Trust (Nasdaq 100)", type: "stock" },
       { pair: "IWMUSD", symbol: "IWM", name: "iShares Russell 2000 ETF", type: "stock" },
+      { pair: "VTIUSD", symbol: "VTI", name: "Vanguard Total Stock Market ETF", type: "stock" },
+      { pair: "VOOUSD", symbol: "VOO", name: "Vanguard S&P 500 ETF", type: "stock" },
+      { pair: "ARKKUSD", symbol: "ARKK", name: "ARK Innovation ETF", type: "stock" },
+      { pair: "TQQQUSD", symbol: "TQQQ", name: "ProShares UltraPro QQQ (3x)", type: "stock" },
+      { pair: "GLDUSD", symbol: "GLD", name: "SPDR Gold Shares", type: "stock" },
+      { pair: "TBLLUSD", symbol: "TBLL", name: "0-3 Month Treasury Bill ETF", type: "stock" },
       // Mega Cap Tech
       { pair: "NVDAUSD", symbol: "NVDA", name: "NVIDIA", type: "stock" },
       { pair: "AAPLUSD", symbol: "AAPL", name: "Apple", type: "stock" },
@@ -1219,18 +1360,63 @@ serve(async (req) => {
       { pair: "AMZNUSD", symbol: "AMZN", name: "Amazon", type: "stock" },
       { pair: "METAUSD", symbol: "META", name: "Meta Platforms", type: "stock" },
       { pair: "TSLAUSD", symbol: "TSLA", name: "Tesla", type: "stock" },
+      { pair: "NFLXUSD", symbol: "NFLX", name: "Netflix", type: "stock" },
       // Semiconductors
       { pair: "AVGOUSD", symbol: "AVGO", name: "Broadcom", type: "stock" },
       { pair: "AMDUSD", symbol: "AMD", name: "Advanced Micro Devices", type: "stock" },
       { pair: "MUUSD", symbol: "MU", name: "Micron Technology", type: "stock" },
-      // Enterprise & Software
+      { pair: "INTCUSD", symbol: "INTC", name: "Intel", type: "stock" },
+      { pair: "QCOMUSD", symbol: "QCOM", name: "Qualcomm", type: "stock" },
+      { pair: "MRVLUSD", symbol: "MRVL", name: "Marvell Technology", type: "stock" },
+      { pair: "ARMUSD", symbol: "ARM", name: "ARM Holdings", type: "stock" },
+      // Enterprise Software & Cloud
       { pair: "ORCLUSD", symbol: "ORCL", name: "Oracle", type: "stock" },
       { pair: "PLTRUSD", symbol: "PLTR", name: "Palantir Technologies", type: "stock" },
-      // Finance
+      { pair: "CRMUSD", symbol: "CRM", name: "Salesforce", type: "stock" },
+      { pair: "ADBEUSD", symbol: "ADBE", name: "Adobe", type: "stock" },
+      { pair: "IBMUSD", symbol: "IBM", name: "IBM", type: "stock" },
+      { pair: "CSCOUSD", symbol: "CSCO", name: "Cisco Systems", type: "stock" },
+      { pair: "CRWDUSD", symbol: "CRWD", name: "CrowdStrike", type: "stock" },
+      { pair: "ACNUSD", symbol: "ACN", name: "Accenture", type: "stock" },
+      // Finance & Banking
       { pair: "JPMUSD", symbol: "JPM", name: "JPMorgan Chase", type: "stock" },
+      { pair: "GSUSD", symbol: "GS", name: "Goldman Sachs", type: "stock" },
+      { pair: "BACUSD", symbol: "BAC", name: "Bank of America", type: "stock" },
+      { pair: "VUSD", symbol: "V", name: "Visa", type: "stock" },
+      { pair: "MAUSD", symbol: "MA", name: "Mastercard", type: "stock" },
+      { pair: "PYPLUSD", symbol: "PYPL", name: "PayPal", type: "stock" },
+      { pair: "SQUSD", symbol: "SQ", name: "Block (Square)", type: "stock" },
+      { pair: "BRKBUSD", symbol: "BRK.B", name: "Berkshire Hathaway", type: "stock" },
+      // Crypto-Related Stocks
+      { pair: "MSTRUSD", symbol: "MSTR", name: "MicroStrategy", type: "stock" },
+      { pair: "COINUSD", symbol: "COIN", name: "Coinbase", type: "stock" },
+      { pair: "HOODUSD", symbol: "HOOD", name: "Robinhood", type: "stock" },
       // Consumer & Retail
       { pair: "COSTUSD", symbol: "COST", name: "Costco Wholesale", type: "stock" },
       { pair: "CVNAUSD", symbol: "CVNA", name: "Carvana", type: "stock" },
+      { pair: "WMTUSD", symbol: "WMT", name: "Walmart", type: "stock" },
+      { pair: "HDUSD", symbol: "HD", name: "Home Depot", type: "stock" },
+      { pair: "NKEUSD", symbol: "NKE", name: "Nike", type: "stock" },
+      { pair: "SBUXUSD", symbol: "SBUX", name: "Starbucks", type: "stock" },
+      { pair: "MCDUSD", symbol: "MCD", name: "McDonald's", type: "stock" },
+      // Healthcare & Pharma
+      { pair: "JNJUSD", symbol: "JNJ", name: "Johnson & Johnson", type: "stock" },
+      { pair: "PFEUSD", symbol: "PFE", name: "Pfizer", type: "stock" },
+      { pair: "MRNAUSD", symbol: "MRNA", name: "Moderna", type: "stock" },
+      { pair: "LLYUSD", symbol: "LLY", name: "Eli Lilly", type: "stock" },
+      { pair: "ABBVUSD", symbol: "ABBV", name: "AbbVie", type: "stock" },
+      { pair: "UNHUSD", symbol: "UNH", name: "UnitedHealth Group", type: "stock" },
+      { pair: "TMOUSD", symbol: "TMO", name: "Thermo Fisher Scientific", type: "stock" },
+      // Energy & Industrials
+      { pair: "XOMUSD", symbol: "XOM", name: "Exxon Mobil", type: "stock" },
+      { pair: "CVXUSD", symbol: "CVX", name: "Chevron", type: "stock" },
+      { pair: "BAUSD", symbol: "BA", name: "Boeing", type: "stock" },
+      { pair: "CATUSD", symbol: "CAT", name: "Caterpillar", type: "stock" },
+      { pair: "GEUSD", symbol: "GE", name: "GE Aerospace", type: "stock" },
+      { pair: "HONUSD", symbol: "HON", name: "Honeywell", type: "stock" },
+      // Media & Entertainment
+      { pair: "DISUSD", symbol: "DIS", name: "Disney", type: "stock" },
+      { pair: "GMEUSD", symbol: "GME", name: "GameStop", type: "stock" },
       // Construction & Materials
       { pair: "CRHUSD", symbol: "CRH", name: "CRH", type: "stock" },
     ];
@@ -1334,6 +1520,11 @@ serve(async (req) => {
         patternRecognitionResult,
         // Real-time search (uses Perplexity for live news)
         perplexityNewsResult,
+        // Stock-specific analysts (only run for stocks)
+        stockFundamentalResult,
+        stockEarningsResult,
+        stockSectorResult,
+        stockInstitutionalResult,
       ] = await Promise.all([
         topTraderAnalystVote(aiContext),
         newsSentimentVote(aiContext),
@@ -1353,6 +1544,11 @@ serve(async (req) => {
         patternRecognitionVote(ohlcContext),
         // Real-time search
         perplexityNewsVote(aiContext),
+        // Stock-specific analysts
+        stockFundamentalAnalystVote(aiContext),
+        stockEarningsAnalystVote(aiContext),
+        stockSectorRotationVote(aiContext),
+        stockInstitutionalFlowVote(aiContext),
       ]);
 
       // Add all AI votes
@@ -1375,6 +1571,11 @@ serve(async (req) => {
         { result: patternRecognitionResult, name: "Pattern Recognition AI" },
         // Real-time search
         { result: perplexityNewsResult, name: "Live News Search" },
+        // Stock-specific analysts (only populated for stocks)
+        { result: stockFundamentalResult, name: "Stock Fundamentals (P/E)" },
+        { result: stockEarningsResult, name: "Earnings Analyst" },
+        { result: stockSectorResult, name: "Sector Rotation" },
+        { result: stockInstitutionalResult, name: "Institutional Flow" },
       ];
 
       for (const { result, name } of aiVotes) {
