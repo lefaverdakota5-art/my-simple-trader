@@ -369,6 +369,211 @@ Respond with ONLY JSON: {"vote":"YES" or "NO","reason":"Brief institutional anal
   });
 }
 
+// Options Flow AI - Monitors unusual options activity for trade signals
+async function optionsFlowAnalystVote(opts: {
+  pct: number;
+  krakenPair: string;
+  symbol: string;
+  ordersLeft: boolean;
+  assetType?: string;
+}): Promise<{ vote: boolean; reason: string } | null> {
+  // Options flow mainly relevant for stocks, but can inform crypto sentiment
+  return lovableAiVote({
+    name: "options-flow-analyst",
+    model: "google/gemini-2.5-pro",
+    systemPrompt: "You are an options flow expert specializing in unusual activity detection. Respond with valid JSON only.",
+    userPrompt: `You are "Options Flow Analyst" - an expert at detecting unusual options activity that signals smart money moves.
+
+Market Data:
+- Symbol: ${opts.symbol} (${opts.krakenPair})
+- Asset Type: ${opts.assetType || "crypto"}
+- Today's price change: ${opts.pct.toFixed(2)}%
+- Can place orders: ${opts.ordersLeft ? "Yes" : "No"}
+
+Options flow signals to analyze:
+- Unusual call volume = bullish institutional bets
+- Large block trades = smart money positioning
+- Call/Put ratio spikes indicate sentiment shifts
+- Sweep orders (aggressive buying) = urgent positioning
+- Near-expiry high volume = imminent move expected
+- Dark pool prints can precede large moves
+
+${opts.assetType === "stock" 
+  ? "For stocks: Watch for earnings-related options positioning, sector ETF flows"
+  : "For crypto: Watch for related stock options (MSTR, COIN, miners) as leading indicators"}
+
+Based on typical options flow patterns, should we BUY?
+Respond with ONLY JSON: {"vote":"YES" or "NO","reason":"Brief options flow analysis (max 50 chars)"}`,
+  });
+}
+
+// ============ HIGH-FREQUENCY MICRO-TRADING ALGORITHMS ============
+
+// Micro-Scalper AI - Optimized for tiny consistent gains (0.1%-0.5%)
+async function microScalperVote(opts: {
+  pct: number;
+  krakenPair: string;
+  symbol: string;
+  ordersLeft: boolean;
+  ohlc: { high: number; low: number; volume: number };
+  assetType?: string;
+}): Promise<{ vote: boolean; reason: string } | null> {
+  const spread = opts.ohlc.high > 0 && opts.ohlc.low > 0 
+    ? ((opts.ohlc.high - opts.ohlc.low) / opts.ohlc.low * 100).toFixed(3) 
+    : "0";
+
+  return lovableAiVote({
+    name: "micro-scalper",
+    model: "google/gemini-2.5-flash",
+    systemPrompt: "You are a high-frequency micro-scalping expert. Focus on tiny, consistent gains. Respond with valid JSON only.",
+    userPrompt: `You are "Micro-Scalper AI" - optimized for tiny consistent gains (0.1%-0.5%) to compound toward $10M.
+
+Market Data:
+- Asset: ${opts.symbol} (${opts.krakenPair})
+- Type: ${opts.assetType || "crypto"}
+- Today's change: ${opts.pct.toFixed(3)}%
+- 24h Spread: ${spread}%
+- Volume: ${opts.ohlc.volume.toFixed(2)}
+- Can trade: ${opts.ordersLeft ? "Yes" : "No"}
+
+MICRO-SCALPING RULES (0.1%-0.5% targets):
+- HIGH liquidity required (volume > average)
+- TIGHT spreads only (< 0.3% spread optimal)
+- Quick in-and-out: 1-5 minute holds
+- Any micro-dip (-0.05% to -0.2%) = BUY opportunity
+- Momentum continuation (+0.1% to +0.3%) = ride the wave
+- AVOID: High volatility (>2%), low volume, wide spreads
+
+Goal: Compound small gains. 0.2% per trade x 50 trades/day = 10%/day = $10M in months.
+
+Is this a good MICRO-SCALP entry?
+Respond with ONLY JSON: {"vote":"YES" or "NO","reason":"Brief micro-scalp analysis (max 50 chars)"}`,
+  });
+}
+
+// Penny Stock Hunter AI - Specialized for low-priced volatile assets
+async function pennyStockHunterVote(opts: {
+  pct: number;
+  krakenPair: string;
+  symbol: string;
+  ordersLeft: boolean;
+  ohlc: { high: number; low: number; volume: number };
+  assetType?: string;
+}): Promise<{ vote: boolean; reason: string } | null> {
+  const volatility = opts.ohlc.high > 0 && opts.ohlc.low > 0 
+    ? ((opts.ohlc.high - opts.ohlc.low) / opts.ohlc.low * 100).toFixed(2) 
+    : "0";
+
+  return lovableAiVote({
+    name: "penny-stock-hunter",
+    model: "google/gemini-2.5-flash",
+    systemPrompt: "You are a penny stock and micro-cap specialist. Respond with valid JSON only.",
+    userPrompt: `You are "Penny Stock Hunter AI" - specialist in low-priced, high-volatility assets for quick gains.
+
+Market Data:
+- Asset: ${opts.symbol} (${opts.krakenPair})
+- Type: ${opts.assetType || "crypto"}
+- Today's change: ${opts.pct.toFixed(2)}%
+- 24h Volatility: ${volatility}%
+- Volume: ${opts.ohlc.volume.toFixed(2)}
+- Can trade: ${opts.ordersLeft ? "Yes" : "No"}
+
+PENNY STOCK / MICRO-CAP RULES:
+- Look for oversold bounces (big dips = buy)
+- Volume spikes indicate breakout potential
+- Meme potential (GME, SHIB, PEPE patterns)
+- Quick 5-20% swings are common
+- Enter on consolidation, exit on pump
+- Small positions, high frequency
+
+For crypto: DOGE, SHIB, PEPE, BONK, FLOKI are "penny" equivalents
+For stocks: Low-float, high short interest = squeeze potential
+
+Is this a good quick-trade opportunity?
+Respond with ONLY JSON: {"vote":"YES" or "NO","reason":"Brief penny analysis (max 50 chars)"}`,
+  });
+}
+
+// ETF Momentum Rider AI - Specialized for ETF trading patterns
+async function etfMomentumRiderVote(opts: {
+  pct: number;
+  krakenPair: string;
+  symbol: string;
+  ordersLeft: boolean;
+  ohlc: { high: number; low: number; volume: number };
+  assetType?: string;
+}): Promise<{ vote: boolean; reason: string } | null> {
+  // ETFs have specific ticker patterns
+  const etfSymbols = ["SPY", "QQQ", "IWM", "VTI", "VOO", "ARKK", "TQQQ", "GLD", "TBLL"];
+  const isEtf = etfSymbols.includes(opts.symbol);
+  
+  return lovableAiVote({
+    name: "etf-momentum-rider",
+    model: "google/gemini-2.5-flash",
+    systemPrompt: "You are an ETF momentum trading specialist. Respond with valid JSON only.",
+    userPrompt: `You are "ETF Momentum Rider AI" - specialist in riding ETF momentum for consistent gains.
+
+Market Data:
+- Asset: ${opts.symbol} (${opts.krakenPair})
+- Is ETF: ${isEtf ? "Yes" : "No (apply ETF-style analysis)"}
+- Today's change: ${opts.pct.toFixed(2)}%
+- 24h High: $${opts.ohlc.high.toFixed(2)}
+- 24h Low: $${opts.ohlc.low.toFixed(2)}
+- Can trade: ${opts.ordersLeft ? "Yes" : "No"}
+
+ETF MOMENTUM RULES:
+- SPY/QQQ lead the market - follow their direction
+- TQQQ (3x leverage) amplifies gains but also losses
+- Sector rotation: Follow money flow between sectors
+- Buy dips in uptrends, sell rips in downtrends
+- End-of-day momentum often continues next morning
+- ARKK leads innovation/growth sentiment
+
+${isEtf ? "This IS an ETF - apply full ETF analysis" : "Apply ETF-style momentum analysis to this asset"}
+
+Is this a good momentum entry?
+Respond with ONLY JSON: {"vote":"YES" or "NO","reason":"Brief ETF momentum analysis (max 50 chars)"}`,
+  });
+}
+
+// Compound Growth Calculator AI - Focuses on path to $10M goal
+async function compoundGrowthVote(opts: {
+  pct: number;
+  krakenPair: string;
+  symbol: string;
+  ordersLeft: boolean;
+  assetType?: string;
+}): Promise<{ vote: boolean; reason: string } | null> {
+  return lovableAiVote({
+    name: "compound-growth-calculator",
+    model: "google/gemini-2.5-flash",
+    systemPrompt: "You are a compound growth optimization expert focused on reaching $10M. Respond with valid JSON only.",
+    userPrompt: `You are "Compound Growth AI" - focused on optimizing every trade to compound toward $10M.
+
+Market Data:
+- Asset: ${opts.symbol} (${opts.krakenPair})
+- Type: ${opts.assetType || "crypto"}
+- Today's change: ${opts.pct.toFixed(2)}%
+- Can trade: ${opts.ordersLeft ? "Yes" : "No"}
+
+COMPOUND GROWTH STRATEGY TO $10M:
+- Start: Assume current portfolio
+- Target: Consistent 0.5-2% gains per trade
+- Frequency: Multiple trades per day
+- Risk: Never risk more than 2% of portfolio per trade
+- Compounding math: 1% daily = 37x annual, 2% daily = 1377x annual
+
+TRADE QUALITY SCORING:
+- High probability setups only (>60% expected win rate)
+- Favorable risk/reward (>2:1 preferred)
+- Quick execution (scalp-friendly conditions)
+- Low slippage (high volume assets)
+
+Does this trade advance our path to $10M efficiently?
+Respond with ONLY JSON: {"vote":"YES" or "NO","reason":"Brief compound analysis (max 50 chars)"}`,
+  });
+}
+
 // Perplexity Real-Time News Search - Gets live market news for sentiment (stocks & crypto)
 async function perplexityNewsVote(opts: {
   pct: number;
@@ -1525,6 +1730,12 @@ serve(async (req) => {
         stockEarningsResult,
         stockSectorResult,
         stockInstitutionalResult,
+        // Options flow and high-frequency trading algorithms
+        optionsFlowResult,
+        microScalperResult,
+        pennyHunterResult,
+        etfMomentumResult,
+        compoundGrowthResult,
       ] = await Promise.all([
         topTraderAnalystVote(aiContext),
         newsSentimentVote(aiContext),
@@ -1549,6 +1760,12 @@ serve(async (req) => {
         stockEarningsAnalystVote(aiContext),
         stockSectorRotationVote(aiContext),
         stockInstitutionalFlowVote(aiContext),
+        // Options flow and high-frequency trading
+        optionsFlowAnalystVote(aiContext),
+        microScalperVote(ohlcContext),
+        pennyStockHunterVote(ohlcContext),
+        etfMomentumRiderVote(ohlcContext),
+        compoundGrowthVote(aiContext),
       ]);
 
       // Add all AI votes
@@ -1576,6 +1793,12 @@ serve(async (req) => {
         { result: stockEarningsResult, name: "Earnings Analyst" },
         { result: stockSectorResult, name: "Sector Rotation" },
         { result: stockInstitutionalResult, name: "Institutional Flow" },
+        // Options flow and high-frequency trading
+        { result: optionsFlowResult, name: "Options Flow AI" },
+        { result: microScalperResult, name: "Micro-Scalper ($10M Goal)" },
+        { result: pennyHunterResult, name: "Penny/Meme Hunter" },
+        { result: etfMomentumResult, name: "ETF Momentum Rider" },
+        { result: compoundGrowthResult, name: "Compound Growth AI" },
       ];
 
       for (const { result, name } of aiVotes) {
