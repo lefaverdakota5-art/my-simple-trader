@@ -844,14 +844,32 @@ serve(async (req) => {
     const notionalUsd = Number(Deno.env.get("BOT_MAX_NOTIONAL_USD") || "50"); // $50 per trade
     const maxOrdersPerDay = Number(Deno.env.get("BOT_MAX_ORDERS_PER_DAY") || "100"); // More trades allowed
     
-    // Multi-pair trading support - BTC, ETH, SOL, and more
+    // Multi-pair trading support - expanded crypto portfolio
     const tradingPairs = [
+      // Major coins
       { pair: "XBTUSD", symbol: "BTC", name: "Bitcoin" },
       { pair: "ETHUSD", symbol: "ETH", name: "Ethereum" },
       { pair: "SOLUSD", symbol: "SOL", name: "Solana" },
+      { pair: "XRPUSD", symbol: "XRP", name: "XRP" },
+      // Layer 1s
       { pair: "ADAUSD", symbol: "ADA", name: "Cardano" },
       { pair: "DOTUSD", symbol: "DOT", name: "Polkadot" },
+      { pair: "AVAXUSD", symbol: "AVAX", name: "Avalanche" },
+      { pair: "ATOMUSD", symbol: "ATOM", name: "Cosmos" },
+      { pair: "NEARUSD", symbol: "NEAR", name: "NEAR Protocol" },
+      { pair: "APTUSD", symbol: "APT", name: "Aptos" },
+      // DeFi & Infrastructure
       { pair: "LINKUSD", symbol: "LINK", name: "Chainlink" },
+      { pair: "UNIUSD", symbol: "UNI", name: "Uniswap" },
+      { pair: "AAVEUSD", symbol: "AAVE", name: "Aave" },
+      { pair: "MATICUSD", symbol: "MATIC", name: "Polygon" },
+      { pair: "ARBUSD", symbol: "ARB", name: "Arbitrum" },
+      // Meme & Others
+      { pair: "DOGEUSD", symbol: "DOGE", name: "Dogecoin" },
+      { pair: "SHIBUSD", symbol: "SHIB", name: "Shiba Inu" },
+      { pair: "PEPEUSD", symbol: "PEPE", name: "Pepe" },
+      { pair: "LTCUSD", symbol: "LTC", name: "Litecoin" },
+      { pair: "BCHUSD", symbol: "BCH", name: "Bitcoin Cash" },
     ];
 
     // Find all active users
