@@ -116,7 +116,8 @@ export function useTraderState(userId: string | null, options: UseTraderStateOpt
             if (options.showNotifications) {
               const soundEnabled = localStorage.getItem("notificationSoundEnabled") !== "false";
               if (soundEnabled) {
-                playNotificationSound();
+                const volume = parseFloat(localStorage.getItem("notificationSoundVolume") || "0.5");
+                playNotificationSound(volume);
               }
               toast({
                 title: "New Trade",
