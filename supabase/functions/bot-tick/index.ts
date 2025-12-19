@@ -698,18 +698,8 @@ serve(async (req) => {
         results.push({ user_id: userId, status: "error", detail: keysErr.message });
         continue;
       }
-      if (!keys?.kraken_key || !keys?.kraken_secret) {
-        // still update council so UI shows activity
-        const c = council(pct, false);
-        await supabaseAdmin.rpc("update_trader_state_from_webhook", {
-          p_user_id: userId,
-          p_council_votes: c.votes,
-          p_council_reasons: c.reasons,
-          p_trade_message: `Bot tick: missing Kraken keys`,
-        });
-        results.push({ user_id: userId, status: "skipped", detail: "missing Kraken keys" });
-        continue;
-      }
+      
+      const hasKrakenKeys = Boolean(keys?.kraken_key && keys?.kraken_secret);
 
       // daily limit
       const { data: stat } = await supabaseAdmin
@@ -816,6 +806,12 @@ serve(async (req) => {
         continue;
       }
 
+      // Skip trading if Kraken keys are missing
+      if (!hasKrakenKeys) {
+        results.push({ user_id: userId, status: "skipped", detail: "missing Kraken keys" });
+        continue;
+      }
+
       // place Kraken crypto order (requires BOT_ALLOW_LIVE=true for safety)
       if (!allowLive) {
         results.push({ user_id: userId, status: "blocked", detail: "live trading disabled (set BOT_ALLOW_LIVE=true)" });
@@ -824,8 +820,8 @@ serve(async (req) => {
 
       try {
         const orderResult = await krakenPlaceOrder({
-          krakenKey: keys.kraken_key,
-          krakenSecret: keys.kraken_secret,
+          krakenKey: String(keys?.kraken_key || ""),
+          krakenSecret: String(keys?.kraken_secret || ""),
           pair: krakenPair,
           volumeUsd: notionalUsd,
         });
