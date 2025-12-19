@@ -131,19 +131,22 @@ async function masterStrategistVote(opts: {
   symbol: string;
   ordersLeft: boolean;
   ohlc: { high: number; low: number; volume: number };
+  assetType?: string;
 }): Promise<{ vote: boolean; reason: string } | null> {
   const range = opts.ohlc.high > 0 && opts.ohlc.low > 0 
     ? ((opts.ohlc.high - opts.ohlc.low) / opts.ohlc.low * 100).toFixed(2) 
     : "unknown";
+  const assetLabel = opts.assetType === "stock" ? "Stock" : "Crypto";
 
   return lovableAiVote({
     name: "master-strategist",
     model: "google/gemini-2.5-pro", // Use Pro model for complex reasoning
-    systemPrompt: "You are an elite trading strategist combining technical, fundamental, and sentiment analysis. Respond with valid JSON only.",
+    systemPrompt: "You are an elite trading strategist combining technical, fundamental, and sentiment analysis for both stocks and crypto. Respond with valid JSON only.",
     userPrompt: `You are "Master Strategist" - an elite AI that synthesizes all trading methodologies.
 
 Market Data:
-- Asset: ${opts.symbol} (Crypto: ${opts.krakenPair})
+- Asset: ${opts.symbol} (${assetLabel}: ${opts.krakenPair})
+- Asset Type: ${assetLabel}
 - Today's change: ${opts.pct.toFixed(2)}%
 - 24h Range: ${range}%
 - 24h High: $${opts.ohlc.high.toFixed(2)}
@@ -156,6 +159,7 @@ Consider ALL factors:
 - Sentiment: Fear/greed based on price action
 - Risk: Position sizing, volatility-adjusted entries
 - Timing: Is this an optimal entry point?
+${opts.assetType === "stock" ? "- Fundamentals: Earnings, P/E ratio, market conditions for stocks" : "- On-chain: Network activity, whale movements for crypto"}
 
 Synthesize all factors. Should we BUY?
 Respond with ONLY JSON: {"vote":"YES" or "NO","reason":"Brief synthesis (max 50 chars)"}`,
@@ -230,12 +234,13 @@ Respond with ONLY JSON: {"vote":"YES" or "NO","reason":"Pattern identified (max 
   });
 }
 
-// Perplexity Real-Time News Search - Gets live market news for sentiment
+// Perplexity Real-Time News Search - Gets live market news for sentiment (stocks & crypto)
 async function perplexityNewsVote(opts: {
   pct: number;
   krakenPair: string;
   symbol: string;
   ordersLeft: boolean;
+  assetType?: string;
 }): Promise<{ vote: boolean; reason: string } | null> {
   const PERPLEXITY_API_KEY = Deno.env.get("PERPLEXITY_API_KEY");
   if (!PERPLEXITY_API_KEY) {
@@ -247,8 +252,10 @@ async function perplexityNewsVote(opts: {
     const controller = new AbortController();
     const t = setTimeout(() => controller.abort(), 15000);
 
-    // Search for recent crypto news
-    const searchQuery = `${opts.symbol} ${opts.krakenPair.replace("USD", "")} crypto news today market sentiment`;
+    const isStock = opts.assetType === "stock";
+    const searchQuery = isStock
+      ? `${opts.symbol} stock news today earnings market sentiment`
+      : `${opts.symbol} ${opts.krakenPair.replace("USD", "")} crypto news today market sentiment`;
     
     const response = await fetch("https://api.perplexity.ai/chat/completions", {
       method: "POST",
@@ -260,8 +267,18 @@ async function perplexityNewsVote(opts: {
       body: JSON.stringify({
         model: "sonar",
         messages: [
-          { role: "system", content: "You are a financial news analyst. Search for recent news and provide a trading recommendation. Respond with valid JSON only." },
-          { role: "user", content: `Search for the latest news about ${opts.symbol} and Bitcoin (${opts.krakenPair}). 
+          { role: "system", content: "You are a financial news analyst covering both stocks and cryptocurrency. Search for recent news and provide a trading recommendation. Respond with valid JSON only." },
+          { role: "user", content: isStock 
+            ? `Search for the latest news about ${opts.symbol} stock (${opts.krakenPair}). 
+            
+Based on today's news sentiment:
+- Price is currently ${opts.pct >= 0 ? "up" : "down"} ${Math.abs(opts.pct).toFixed(2)}%
+- Can we place orders: ${opts.ordersLeft ? "Yes" : "No"}
+- Consider: earnings reports, analyst ratings, SEC filings, market news
+
+Analyze the stock news sentiment and recommend: should we BUY now?
+Respond with ONLY JSON: {"vote":"YES" or "NO","reason":"Brief news-based reason (max 50 chars)"}`
+            : `Search for the latest news about ${opts.symbol} and Bitcoin (${opts.krakenPair}). 
           
 Based on today's news sentiment:
 - Price is currently ${opts.pct >= 0 ? "up" : "down"} ${Math.abs(opts.pct).toFixed(2)}%
@@ -1089,116 +1106,133 @@ serve(async (req) => {
     const notionalUsd = Number(Deno.env.get("BOT_MAX_NOTIONAL_USD") || "50"); // $50 per trade
     const maxOrdersPerDay = Number(Deno.env.get("BOT_MAX_ORDERS_PER_DAY") || "100"); // More trades allowed
     
-    // All available Kraken USD trading pairs - comprehensive crypto coverage
+    // All available Kraken trading pairs - Crypto + xStocks (Tokenized Stocks & ETFs)
     const tradingPairs = [
-      // Major coins (Top 10)
-      { pair: "XBTUSD", symbol: "BTC", name: "Bitcoin" },
-      { pair: "ETHUSD", symbol: "ETH", name: "Ethereum" },
-      { pair: "SOLUSD", symbol: "SOL", name: "Solana" },
-      { pair: "XRPUSD", symbol: "XRP", name: "XRP" },
-      { pair: "ADAUSD", symbol: "ADA", name: "Cardano" },
-      { pair: "DOTUSD", symbol: "DOT", name: "Polkadot" },
-      { pair: "AVAXUSD", symbol: "AVAX", name: "Avalanche" },
-      { pair: "LINKUSD", symbol: "LINK", name: "Chainlink" },
-      { pair: "LTCUSD", symbol: "LTC", name: "Litecoin" },
-      { pair: "BCHUSD", symbol: "BCH", name: "Bitcoin Cash" },
+      // ============ CRYPTO - Major coins (Top 10) ============
+      { pair: "XBTUSD", symbol: "BTC", name: "Bitcoin", type: "crypto" },
+      { pair: "ETHUSD", symbol: "ETH", name: "Ethereum", type: "crypto" },
+      { pair: "SOLUSD", symbol: "SOL", name: "Solana", type: "crypto" },
+      { pair: "XRPUSD", symbol: "XRP", name: "XRP", type: "crypto" },
+      { pair: "ADAUSD", symbol: "ADA", name: "Cardano", type: "crypto" },
+      { pair: "DOTUSD", symbol: "DOT", name: "Polkadot", type: "crypto" },
+      { pair: "AVAXUSD", symbol: "AVAX", name: "Avalanche", type: "crypto" },
+      { pair: "LINKUSD", symbol: "LINK", name: "Chainlink", type: "crypto" },
+      { pair: "LTCUSD", symbol: "LTC", name: "Litecoin", type: "crypto" },
+      { pair: "BCHUSD", symbol: "BCH", name: "Bitcoin Cash", type: "crypto" },
       // Layer 1 & Layer 2
-      { pair: "ATOMUSD", symbol: "ATOM", name: "Cosmos" },
-      { pair: "NEARUSD", symbol: "NEAR", name: "NEAR Protocol" },
-      { pair: "APTUSD", symbol: "APT", name: "Aptos" },
-      { pair: "SUIUSD", symbol: "SUI", name: "Sui" },
-      { pair: "ICPUSD", symbol: "ICP", name: "Internet Computer" },
-      { pair: "ALGOUSD", symbol: "ALGO", name: "Algorand" },
-      { pair: "XLMUSD", symbol: "XLM", name: "Stellar" },
-      { pair: "HBARUSD", symbol: "HBAR", name: "Hedera" },
-      { pair: "VETUSD", symbol: "VET", name: "VeChain" },
-      { pair: "FILUSD", symbol: "FIL", name: "Filecoin" },
-      { pair: "EGLDUSD", symbol: "EGLD", name: "MultiversX" },
-      { pair: "EOSUSD", symbol: "EOS", name: "EOS" },
-      { pair: "XTZUSD", symbol: "XTZ", name: "Tezos" },
-      { pair: "FLOWUSD", symbol: "FLOW", name: "Flow" },
-      { pair: "MINAUSD", symbol: "MINA", name: "Mina" },
-      { pair: "KASUSD", symbol: "KAS", name: "Kaspa" },
-      { pair: "SEIUSD", symbol: "SEI", name: "Sei" },
-      { pair: "INJUSD", symbol: "INJ", name: "Injective" },
-      { pair: "TIAUSD", symbol: "TIA", name: "Celestia" },
-      { pair: "ARBUSD", symbol: "ARB", name: "Arbitrum" },
-      { pair: "OPUSD", symbol: "OP", name: "Optimism" },
-      { pair: "MATICUSD", symbol: "MATIC", name: "Polygon" },
-      { pair: "IMXUSD", symbol: "IMX", name: "Immutable X" },
-      { pair: "MANTUSD", symbol: "MANT", name: "Mantle" },
-      { pair: "STXUSD", symbol: "STX", name: "Stacks" },
+      { pair: "ATOMUSD", symbol: "ATOM", name: "Cosmos", type: "crypto" },
+      { pair: "NEARUSD", symbol: "NEAR", name: "NEAR Protocol", type: "crypto" },
+      { pair: "APTUSD", symbol: "APT", name: "Aptos", type: "crypto" },
+      { pair: "SUIUSD", symbol: "SUI", name: "Sui", type: "crypto" },
+      { pair: "ICPUSD", symbol: "ICP", name: "Internet Computer", type: "crypto" },
+      { pair: "ALGOUSD", symbol: "ALGO", name: "Algorand", type: "crypto" },
+      { pair: "XLMUSD", symbol: "XLM", name: "Stellar", type: "crypto" },
+      { pair: "HBARUSD", symbol: "HBAR", name: "Hedera", type: "crypto" },
+      { pair: "VETUSD", symbol: "VET", name: "VeChain", type: "crypto" },
+      { pair: "FILUSD", symbol: "FIL", name: "Filecoin", type: "crypto" },
+      { pair: "EGLDUSD", symbol: "EGLD", name: "MultiversX", type: "crypto" },
+      { pair: "EOSUSD", symbol: "EOS", name: "EOS", type: "crypto" },
+      { pair: "XTZUSD", symbol: "XTZ", name: "Tezos", type: "crypto" },
+      { pair: "FLOWUSD", symbol: "FLOW", name: "Flow", type: "crypto" },
+      { pair: "MINAUSD", symbol: "MINA", name: "Mina", type: "crypto" },
+      { pair: "KASUSD", symbol: "KAS", name: "Kaspa", type: "crypto" },
+      { pair: "SEIUSD", symbol: "SEI", name: "Sei", type: "crypto" },
+      { pair: "INJUSD", symbol: "INJ", name: "Injective", type: "crypto" },
+      { pair: "TIAUSD", symbol: "TIA", name: "Celestia", type: "crypto" },
+      { pair: "ARBUSD", symbol: "ARB", name: "Arbitrum", type: "crypto" },
+      { pair: "OPUSD", symbol: "OP", name: "Optimism", type: "crypto" },
+      { pair: "MATICUSD", symbol: "MATIC", name: "Polygon", type: "crypto" },
+      { pair: "IMXUSD", symbol: "IMX", name: "Immutable X", type: "crypto" },
+      { pair: "MANTUSD", symbol: "MANT", name: "Mantle", type: "crypto" },
+      { pair: "STXUSD", symbol: "STX", name: "Stacks", type: "crypto" },
       // DeFi
-      { pair: "UNIUSD", symbol: "UNI", name: "Uniswap" },
-      { pair: "AAVEUSD", symbol: "AAVE", name: "Aave" },
-      { pair: "MKRUSD", symbol: "MKR", name: "Maker" },
-      { pair: "SNXUSD", symbol: "SNX", name: "Synthetix" },
-      { pair: "CRVUSD", symbol: "CRV", name: "Curve" },
-      { pair: "COMPUSD", symbol: "COMP", name: "Compound" },
-      { pair: "LDOUSD", symbol: "LDO", name: "Lido DAO" },
-      { pair: "SUSHIUSD", symbol: "SUSHI", name: "SushiSwap" },
-      { pair: "1INCHUSD", symbol: "1INCH", name: "1inch" },
-      { pair: "BALUSD", symbol: "BAL", name: "Balancer" },
-      { pair: "YFIUSD", symbol: "YFI", name: "yearn.finance" },
-      { pair: "GMXUSD", symbol: "GMX", name: "GMX" },
-      { pair: "DYDXUSD", symbol: "DYDX", name: "dYdX" },
-      { pair: "RPLETH", symbol: "RPL", name: "Rocket Pool" },
-      { pair: "PENDLE", symbol: "PENDLE", name: "Pendle" },
+      { pair: "UNIUSD", symbol: "UNI", name: "Uniswap", type: "crypto" },
+      { pair: "AAVEUSD", symbol: "AAVE", name: "Aave", type: "crypto" },
+      { pair: "MKRUSD", symbol: "MKR", name: "Maker", type: "crypto" },
+      { pair: "SNXUSD", symbol: "SNX", name: "Synthetix", type: "crypto" },
+      { pair: "CRVUSD", symbol: "CRV", name: "Curve", type: "crypto" },
+      { pair: "COMPUSD", symbol: "COMP", name: "Compound", type: "crypto" },
+      { pair: "LDOUSD", symbol: "LDO", name: "Lido DAO", type: "crypto" },
+      { pair: "SUSHIUSD", symbol: "SUSHI", name: "SushiSwap", type: "crypto" },
+      { pair: "1INCHUSD", symbol: "1INCH", name: "1inch", type: "crypto" },
+      { pair: "BALUSD", symbol: "BAL", name: "Balancer", type: "crypto" },
+      { pair: "YFIUSD", symbol: "YFI", name: "yearn.finance", type: "crypto" },
+      { pair: "GMXUSD", symbol: "GMX", name: "GMX", type: "crypto" },
+      { pair: "DYDXUSD", symbol: "DYDX", name: "dYdX", type: "crypto" },
       // AI & Data
-      { pair: "FETUSD", symbol: "FET", name: "Fetch.ai" },
-      { pair: "GRTUSD", symbol: "GRT", name: "The Graph" },
-      { pair: "RENDERUSD", symbol: "RNDR", name: "Render" },
-      { pair: "OCEANUSD", symbol: "OCEAN", name: "Ocean Protocol" },
-      { pair: "AABORUSD", symbol: "AGIX", name: "SingularityNET" },
-      { pair: "AKTUSD", symbol: "AKT", name: "Akash Network" },
-      { pair: "TAOUSD", symbol: "TAO", name: "Bittensor" },
-      { pair: "WLDUSD", symbol: "WLD", name: "Worldcoin" },
-      { pair: "ARWEAVE", symbol: "AR", name: "Arweave" },
+      { pair: "FETUSD", symbol: "FET", name: "Fetch.ai", type: "crypto" },
+      { pair: "GRTUSD", symbol: "GRT", name: "The Graph", type: "crypto" },
+      { pair: "RENDERUSD", symbol: "RNDR", name: "Render", type: "crypto" },
+      { pair: "OCEANUSD", symbol: "OCEAN", name: "Ocean Protocol", type: "crypto" },
+      { pair: "AKTUSD", symbol: "AKT", name: "Akash Network", type: "crypto" },
+      { pair: "TAOUSD", symbol: "TAO", name: "Bittensor", type: "crypto" },
+      { pair: "WLDUSD", symbol: "WLD", name: "Worldcoin", type: "crypto" },
       // Gaming & Metaverse
-      { pair: "MANAUSD", symbol: "MANA", name: "Decentraland" },
-      { pair: "SANDUSD", symbol: "SAND", name: "The Sandbox" },
-      { pair: "AXSUSD", symbol: "AXS", name: "Axie Infinity" },
-      { pair: "GALAUSD", symbol: "GALA", name: "Gala" },
-      { pair: "ENJUSD", symbol: "ENJ", name: "Enjin Coin" },
-      { pair: "ILCUSD", symbol: "ILV", name: "Illuvium" },
-      { pair: "APEUSD", symbol: "APE", name: "ApeCoin" },
-      { pair: "RONUSD", symbol: "RON", name: "Ronin" },
-      { pair: "PRIMEUSD", symbol: "PRIME", name: "Echelon Prime" },
+      { pair: "MANAUSD", symbol: "MANA", name: "Decentraland", type: "crypto" },
+      { pair: "SANDUSD", symbol: "SAND", name: "The Sandbox", type: "crypto" },
+      { pair: "AXSUSD", symbol: "AXS", name: "Axie Infinity", type: "crypto" },
+      { pair: "GALAUSD", symbol: "GALA", name: "Gala", type: "crypto" },
+      { pair: "ENJUSD", symbol: "ENJ", name: "Enjin Coin", type: "crypto" },
+      { pair: "APEUSD", symbol: "APE", name: "ApeCoin", type: "crypto" },
+      { pair: "RONUSD", symbol: "RON", name: "Ronin", type: "crypto" },
       // Meme coins
-      { pair: "DOGEUSD", symbol: "DOGE", name: "Dogecoin" },
-      { pair: "SHIBUSD", symbol: "SHIB", name: "Shiba Inu" },
-      { pair: "PEPEUSD", symbol: "PEPE", name: "Pepe" },
-      { pair: "FLOKIUSD", symbol: "FLOKI", name: "Floki" },
-      { pair: "BONKUSD", symbol: "BONK", name: "Bonk" },
-      { pair: "WIFUSD", symbol: "WIF", name: "dogwifhat" },
-      { pair: "MEMEUSD", symbol: "MEME", name: "Memecoin" },
+      { pair: "DOGEUSD", symbol: "DOGE", name: "Dogecoin", type: "crypto" },
+      { pair: "SHIBUSD", symbol: "SHIB", name: "Shiba Inu", type: "crypto" },
+      { pair: "PEPEUSD", symbol: "PEPE", name: "Pepe", type: "crypto" },
+      { pair: "FLOKIUSD", symbol: "FLOKI", name: "Floki", type: "crypto" },
+      { pair: "BONKUSD", symbol: "BONK", name: "Bonk", type: "crypto" },
+      { pair: "WIFUSD", symbol: "WIF", name: "dogwifhat", type: "crypto" },
       // Privacy & Misc
-      { pair: "XMRUSD", symbol: "XMR", name: "Monero" },
-      { pair: "ZECUSD", symbol: "ZEC", name: "Zcash" },
-      { pair: "DASHUSD", symbol: "DASH", name: "Dash" },
-      { pair: "PAXGUSD", symbol: "PAXG", name: "PAX Gold" },
-      { pair: "KSMUSD", symbol: "KSM", name: "Kusama" },
-      { pair: "QNTUSD", symbol: "QNT", name: "Quant" },
-      { pair: "RUNEUSD", symbol: "RUNE", name: "THORChain" },
-      { pair: "KAVAUSD", symbol: "KAVA", name: "Kava" },
-      { pair: "ZRXUSD", symbol: "ZRX", name: "0x" },
-      { pair: "BNTUSD", symbol: "BNT", name: "Bancor" },
-      { pair: "ANTUSD", symbol: "ANT", name: "Aragon" },
-      { pair: "STORJUSD", symbol: "STORJ", name: "Storj" },
-      { pair: "ENSUSD", symbol: "ENS", name: "ENS" },
-      { pair: "BATUSD", symbol: "BAT", name: "Basic Attention Token" },
-      { pair: "CHZUSD", symbol: "CHZ", name: "Chiliz" },
-      { pair: "ANKRUSD", symbol: "ANKR", name: "Ankr" },
-      { pair: "AUDIOUSD", symbol: "AUDIO", name: "Audius" },
-      { pair: "COTIUSD", symbol: "COTI", name: "COTI" },
-      { pair: "JASMYUSD", symbol: "JASMY", name: "JasmyCoin" },
-      { pair: "PYTHUSD", symbol: "PYTH", name: "Pyth Network" },
-      { pair: "JUPUSD", symbol: "JUP", name: "Jupiter" },
-      { pair: "JTOUSD", symbol: "JTO", name: "Jito" },
-      { pair: "WUSD", symbol: "W", name: "Wormhole" },
-      { pair: "STRKUSD", symbol: "STRK", name: "Starknet" },
-      { pair: "ETHFIUSD", symbol: "ETHFI", name: "ether.fi" },
-      { pair: "ENAUSD", symbol: "ENA", name: "Ethena" },
+      { pair: "XMRUSD", symbol: "XMR", name: "Monero", type: "crypto" },
+      { pair: "ZECUSD", symbol: "ZEC", name: "Zcash", type: "crypto" },
+      { pair: "DASHUSD", symbol: "DASH", name: "Dash", type: "crypto" },
+      { pair: "PAXGUSD", symbol: "PAXG", name: "PAX Gold", type: "crypto" },
+      { pair: "KSMUSD", symbol: "KSM", name: "Kusama", type: "crypto" },
+      { pair: "QNTUSD", symbol: "QNT", name: "Quant", type: "crypto" },
+      { pair: "RUNEUSD", symbol: "RUNE", name: "THORChain", type: "crypto" },
+      { pair: "KAVAUSD", symbol: "KAVA", name: "Kava", type: "crypto" },
+      { pair: "ZRXUSD", symbol: "ZRX", name: "0x", type: "crypto" },
+      { pair: "ENSUSD", symbol: "ENS", name: "ENS", type: "crypto" },
+      { pair: "BATUSD", symbol: "BAT", name: "Basic Attention Token", type: "crypto" },
+      { pair: "CHZUSD", symbol: "CHZ", name: "Chiliz", type: "crypto" },
+      { pair: "ANKRUSD", symbol: "ANKR", name: "Ankr", type: "crypto" },
+      { pair: "AUDIOUSD", symbol: "AUDIO", name: "Audius", type: "crypto" },
+      { pair: "PYTHUSD", symbol: "PYTH", name: "Pyth Network", type: "crypto" },
+      { pair: "JUPUSD", symbol: "JUP", name: "Jupiter", type: "crypto" },
+      { pair: "JTOUSD", symbol: "JTO", name: "Jito", type: "crypto" },
+      { pair: "WUSD", symbol: "W", name: "Wormhole", type: "crypto" },
+      { pair: "STRKUSD", symbol: "STRK", name: "Starknet", type: "crypto" },
+      { pair: "ETHFIUSD", symbol: "ETHFI", name: "ether.fi", type: "crypto" },
+      { pair: "ENAUSD", symbol: "ENA", name: "Ethena", type: "crypto" },
+      
+      // ============ xSTOCKS - Tokenized US Stocks & ETFs (Kraken) ============
+      // Major ETFs
+      { pair: "SPYUSD", symbol: "SPY", name: "SPDR S&P 500 ETF Trust", type: "stock" },
+      { pair: "QQQUSD", symbol: "QQQ", name: "Invesco QQQ Trust", type: "stock" },
+      { pair: "IWMUSD", symbol: "IWM", name: "iShares Russell 2000 ETF", type: "stock" },
+      // Mega Cap Tech
+      { pair: "NVDAUSD", symbol: "NVDA", name: "NVIDIA", type: "stock" },
+      { pair: "AAPLUSD", symbol: "AAPL", name: "Apple", type: "stock" },
+      { pair: "MSFTUSD", symbol: "MSFT", name: "Microsoft", type: "stock" },
+      { pair: "GOOGLUSD", symbol: "GOOGL", name: "Alphabet (Class A)", type: "stock" },
+      { pair: "GOOGUSD", symbol: "GOOG", name: "Alphabet (Class C)", type: "stock" },
+      { pair: "AMZNUSD", symbol: "AMZN", name: "Amazon", type: "stock" },
+      { pair: "METAUSD", symbol: "META", name: "Meta Platforms", type: "stock" },
+      { pair: "TSLAUSD", symbol: "TSLA", name: "Tesla", type: "stock" },
+      // Semiconductors
+      { pair: "AVGOUSD", symbol: "AVGO", name: "Broadcom", type: "stock" },
+      { pair: "AMDUSD", symbol: "AMD", name: "Advanced Micro Devices", type: "stock" },
+      { pair: "MUUSD", symbol: "MU", name: "Micron Technology", type: "stock" },
+      // Enterprise & Software
+      { pair: "ORCLUSD", symbol: "ORCL", name: "Oracle", type: "stock" },
+      { pair: "PLTRUSD", symbol: "PLTR", name: "Palantir Technologies", type: "stock" },
+      // Finance
+      { pair: "JPMUSD", symbol: "JPM", name: "JPMorgan Chase", type: "stock" },
+      // Consumer & Retail
+      { pair: "COSTUSD", symbol: "COST", name: "Costco Wholesale", type: "stock" },
+      { pair: "CVNAUSD", symbol: "CVNA", name: "Carvana", type: "stock" },
+      // Construction & Materials
+      { pair: "CRHUSD", symbol: "CRH", name: "CRH", type: "stock" },
     ];
 
     // Find all active users
@@ -1240,7 +1274,8 @@ serve(async (req) => {
       }
     }
     
-    console.log(`[bot-tick] Best opportunity: ${bestPair.symbol} at ${bestPct.toFixed(2)}%`);
+    const bestAssetType = (bestPair as { type?: string }).type || "crypto";
+    console.log(`[bot-tick] Best opportunity: ${bestPair.symbol} (${bestAssetType}) at ${bestPct.toFixed(2)}%`);
 
     for (const userId of users) {
       // pull keys
@@ -1270,13 +1305,14 @@ serve(async (req) => {
       const krakenPair = bestPair.pair;
       const pct = bestPct;
       const ohlc = bestOhlc;
+      const assetType = (bestPair as { type?: string }).type || "crypto";
 
       let c = council(pct, ordersLeft);
       let totalMembers = 5;
       let yesVotes = Number(String(c.votes).split("/")[0] || "0");
 
       // Run ALL AI analysts in parallel for maximum speed (uses Lovable AI + Perplexity - no user config needed)
-      const aiContext = { pct, krakenPair, symbol: bestPair.symbol, ordersLeft };
+      const aiContext = { pct, krakenPair, symbol: bestPair.symbol, ordersLeft, assetType };
       const ohlcContext = { ...aiContext, ohlc };
       
       const [
