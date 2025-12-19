@@ -5,6 +5,7 @@ import { useTraderState } from '@/hooks/useTraderState';
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { PerformanceChart } from "@/components/PerformanceChart";
 import { 
   TrendingUp, 
   TrendingDown, 
@@ -225,6 +226,19 @@ export default function Dashboard() {
             </p>
           </CardContent>
         </Card>
+      </div>
+
+      {/* Performance Chart */}
+      <div className="mb-6">
+        <PerformanceChart 
+          trades={trades} 
+          currentState={state ? {
+            balance: state.balance,
+            portfolio_value: state.portfolio_value,
+            todays_profit: state.todays_profit,
+            win_rate: state.win_rate,
+          } : null} 
+        />
       </div>
 
       {/* Control Buttons */}
