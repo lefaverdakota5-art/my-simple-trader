@@ -66,7 +66,7 @@ serve(async (req) => {
     if (action === "status") {
       const { data, error } = await supabaseAdmin
         .from("user_exchange_keys")
-        .select("alpaca_api_key,alpaca_secret,kraken_key,kraken_secret,plaid_client_id,plaid_secret,plaid_env,openai_enabled,openai_model,openai_api_key,default_take_profit_percent,default_stop_loss_percent,trailing_stop_percent")
+        .select("alpaca_api_key,alpaca_secret,kraken_key,kraken_secret,plaid_client_id,plaid_secret,plaid_env,openai_enabled,openai_model,openai_api_key,default_take_profit_percent,default_stop_loss_percent,trailing_stop_percent,max_position_percent")
         .eq("user_id", userId)
         .maybeSingle();
 
@@ -86,6 +86,7 @@ serve(async (req) => {
         takeProfitPercent: data?.default_take_profit_percent ?? 10,
         stopLossPercent: data?.default_stop_loss_percent ?? 5,
         trailingStopPercent: data?.trailing_stop_percent ?? null,
+        maxPositionPercent: data?.max_position_percent ?? 10,
       });
     }
 
@@ -93,6 +94,7 @@ serve(async (req) => {
       const takeProfitPercent = Number(body?.take_profit_percent ?? 10);
       const stopLossPercent = Number(body?.stop_loss_percent ?? 5);
       const trailingStopPercent = body?.trailing_stop_percent != null ? Number(body.trailing_stop_percent) : null;
+      const maxPositionPercent = Number(body?.max_position_percent ?? 10);
       
       // Validate ranges
       if (takeProfitPercent < 0.5 || takeProfitPercent > 100) {
@@ -104,6 +106,9 @@ serve(async (req) => {
       if (trailingStopPercent !== null && (trailingStopPercent < 0.5 || trailingStopPercent > 50)) {
         return jsonResponse({ error: "Trailing stop must be between 0.5% and 50%" }, 400);
       }
+      if (maxPositionPercent < 1 || maxPositionPercent > 100) {
+        return jsonResponse({ error: "Max position size must be between 1% and 100%" }, 400);
+      }
 
       const { error } = await supabaseAdmin
         .from("user_exchange_keys")
@@ -112,6 +117,7 @@ serve(async (req) => {
           default_take_profit_percent: takeProfitPercent,
           default_stop_loss_percent: stopLossPercent,
           trailing_stop_percent: trailingStopPercent,
+          max_position_percent: maxPositionPercent,
           updated_at: new Date().toISOString(),
         }, { onConflict: "user_id" });
       
