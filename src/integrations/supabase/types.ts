@@ -152,6 +152,30 @@ export type Database = {
         }
         Relationships: []
       }
+      user_bot_daily_stats: {
+        Row: {
+          day: string
+          id: string
+          orders_count: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          day?: string
+          id?: string
+          orders_count?: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          day?: string
+          id?: string
+          orders_count?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       user_exchange_keys: {
         Row: {
           alpaca_api_key: string | null
