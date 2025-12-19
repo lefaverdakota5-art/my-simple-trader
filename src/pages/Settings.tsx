@@ -71,6 +71,10 @@ export default function Settings() {
     const saved = localStorage.getItem("notificationSoundEnabled");
     return saved !== null ? saved === "true" : true;
   });
+  const [soundVolume, setSoundVolume] = useState(() => {
+    const saved = localStorage.getItem("notificationSoundVolume");
+    return saved !== null ? parseFloat(saved) : 0.5;
+  });
 
   useEffect(() => {
     if (!authLoading && !user) navigate("/");
@@ -149,7 +153,7 @@ export default function Settings() {
         <h2 className="medium-text" style={{ fontWeight: 600, marginBottom: "12px" }}>
           Notifications
         </h2>
-        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+        <div style={{ display: "flex", gap: "8px", alignItems: "center", marginBottom: "12px" }}>
           <input
             type="checkbox"
             checked={soundEnabled}
@@ -161,6 +165,26 @@ export default function Settings() {
           />
           <span>Play sound on new trade notifications</span>
         </div>
+        {soundEnabled && (
+          <div style={{ marginBottom: "12px" }}>
+            <label style={{ display: "block", marginBottom: "8px", fontWeight: 500 }}>
+              Volume: {Math.round(soundVolume * 100)}%
+            </label>
+            <input
+              type="range"
+              min="0"
+              max="1"
+              step="0.05"
+              value={soundVolume}
+              onChange={(e) => {
+                const val = parseFloat(e.target.value);
+                setSoundVolume(val);
+                localStorage.setItem("notificationSoundVolume", String(val));
+              }}
+              style={{ width: "100%", maxWidth: "300px" }}
+            />
+          </div>
+        )}
       </div>
 
       <div style={{ marginTop: "24px" }}>

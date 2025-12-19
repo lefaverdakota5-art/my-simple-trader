@@ -3,7 +3,7 @@ import { useCallback, useRef } from 'react';
 export function useNotificationSound() {
   const audioContextRef = useRef<AudioContext | null>(null);
 
-  const playNotificationSound = useCallback(() => {
+  const playNotificationSound = useCallback((volume: number = 0.5) => {
     try {
       // Create or reuse AudioContext
       if (!audioContextRef.current) {
@@ -33,9 +33,10 @@ export function useNotificationSound() {
       oscillator.frequency.setValueAtTime(880, now); // A5
       oscillator.frequency.setValueAtTime(1108.73, now + 0.1); // C#6
       
-      // Envelope for smooth attack and decay
+      // Envelope for smooth attack and decay with volume control
+      const maxGain = 0.3 * volume;
       gainNode.gain.setValueAtTime(0, now);
-      gainNode.gain.linearRampToValueAtTime(0.3, now + 0.02);
+      gainNode.gain.linearRampToValueAtTime(maxGain, now + 0.02);
       gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
       
       oscillator.start(now);
