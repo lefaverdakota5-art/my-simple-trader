@@ -12,13 +12,29 @@ interface ChimeDetails {
   chime_account_name: string | null;
 }
 
+interface PlaidBalance {
+  available: number | null;
+  current: number | null;
+  limit: number | null;
+}
+
+interface PlaidAccount {
+  account_id: string;
+  name: string;
+  mask: string;
+  type: string;
+  subtype: string;
+  balances: PlaidBalance;
+}
+
 export default function Withdraw() {
   const { user, loading: authLoading } = useAuth();
-  const { state, loading: stateLoading } = useTraderState(user?.id || null);
+  const { state, loading: stateLoading, refetch: refetchState } = useTraderState(user?.id || null);
   const navigate = useNavigate();
   const botApiBase = getBotApiBaseUrl();
   
   const [amount, setAmount] = useState('');
+  const [mode, setMode] = useState<'deposit' | 'withdraw'>('deposit');
   const [withdrawType, setWithdrawType] = useState('chime_direct');
   const [submitting, setSubmitting] = useState(false);
   const [withdrawals, setWithdrawals] = useState<WithdrawalRequest[]>([]);
@@ -26,6 +42,8 @@ export default function Withdraw() {
   const [krakenAsset, setKrakenAsset] = useState("ZUSD");
   const [chimeDetails, setChimeDetails] = useState<ChimeDetails | null>(null);
   const [loadingChime, setLoadingChime] = useState(true);
+  const [chimeBalance, setChimeBalance] = useState<number | null>(null);
+  const [plaidAccounts, setPlaidAccounts] = useState<PlaidAccount[]>([]);
 
   interface WithdrawalRequest {
     id: string;
@@ -41,6 +59,37 @@ export default function Withdraw() {
       navigate('/');
     }
   }, [user, authLoading, navigate]);
+
+  // Fetch Plaid/Chime balance
+  useEffect(() => {
+    if (!user || !botApiBase) return;
+
+    const fetchChimeBalance = async () => {
+      try {
+        const token = await getSupabaseAccessToken();
+        if (!token) return;
+
+        const response = await fetch(`${botApiBase}/plaid/accounts`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          if (data.connected && data.accounts && data.accounts.length > 0) {
+            setPlaidAccounts(data.accounts);
+            // Use the first account's balance
+            const primaryAccount = data.accounts[0];
+            const balance = primaryAccount.balances?.available ?? primaryAccount.balances?.current ?? null;
+            setChimeBalance(balance);
+          }
+        }
+      } catch (error) {
+        console.error('Failed to fetch Chime balance:', error);
+      }
+    };
+
+    fetchChimeBalance();
+  }, [user, botApiBase]);
 
   // Fetch existing withdrawal requests and Chime details
   useEffect(() => {
@@ -81,6 +130,100 @@ export default function Withdraw() {
 
   const getAccessToken = async () => getSupabaseAccessToken();
 
+  // Deposit money from Chime to trading account
+  const handleChimeDeposit = async () => {
+    if (!user || !botApiBase) return;
+    
+    const numAmount = parseFloat(amount);
+    if (isNaN(numAmount) || numAmount <= 0) {
+      toast({
+        title: 'Error',
+        description: 'Please enter a valid amount',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    if (!chimeDetails?.chime_routing_number || !chimeDetails?.chime_account_number) {
+      toast({
+        title: 'Chime Not Connected',
+        description: 'Please connect your Chime account in Settings first.',
+        variant: 'destructive',
+      });
+      navigate('/settings');
+      return;
+    }
+
+    // Check against Chime balance if available
+    if (chimeBalance !== null && numAmount > chimeBalance) {
+      toast({
+        title: 'Error',
+        description: `Insufficient Chime balance. Available: $${chimeBalance.toFixed(2)}`,
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setSubmitting(true);
+
+    try {
+      const token = await getAccessToken();
+      if (!token) {
+        toast({
+          title: 'Error',
+          description: 'Authentication failed',
+          variant: 'destructive',
+        });
+        setSubmitting(false);
+        return;
+      }
+
+      const response = await fetch(`${botApiBase}/deposit/from_chime`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ amount: numAmount }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        toast({
+          title: 'Error',
+          description: data.error || 'Deposit failed',
+          variant: 'destructive',
+        });
+      } else {
+        toast({
+          title: '✅ Deposit Successful!',
+          description: `$${numAmount.toFixed(2)} deposited from Chime to trading account`,
+        });
+        setAmount('');
+        
+        // Refresh state and withdrawals list
+        refetchState();
+        const { data: withdrawalData } = await supabase
+          .from('withdrawal_requests')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false })
+          .limit(10);
+        
+        if (withdrawalData) setWithdrawals(withdrawalData);
+      }
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: 'Failed to process deposit',
+        variant: 'destructive',
+      });
+    }
+
+    setSubmitting(false);
+  };
+
   // Chime Direct withdrawal - creates a withdrawal request with Chime details
   const handleChimeDirectWithdraw = async () => {
     if (!user) return;
@@ -105,10 +248,11 @@ export default function Withdraw() {
       return;
     }
 
+    // Check against trading balance for withdrawals
     if (numAmount > (state?.balance || 0)) {
       toast({
         title: 'Error',
-        description: 'Insufficient balance',
+        description: `Insufficient trading balance. Available: $${(state?.balance || 0).toFixed(2)}`,
         variant: 'destructive',
       });
       return;
@@ -307,22 +451,94 @@ export default function Withdraw() {
         ← Back to Dashboard
       </button>
 
-      <h1 className="big-text" style={{ marginBottom: '16px' }}>Withdraw Money</h1>
+      <h1 className="big-text" style={{ marginBottom: '16px' }}>Banking</h1>
       
-      <p className="medium-text" style={{ marginBottom: '24px' }}>
-        Available Balance: {formatMoney(state?.balance || 0)}
-      </p>
+      {/* Balance Display */}
+      <div style={{ 
+        display: 'grid', 
+        gridTemplateColumns: '1fr 1fr', 
+        gap: '16px', 
+        marginBottom: '24px' 
+      }}>
+        <div style={{ 
+          padding: '16px', 
+          background: 'hsl(var(--muted))', 
+          borderRadius: '8px',
+          border: '1px solid hsl(var(--border))'
+        }}>
+          <p style={{ fontSize: '0.875rem', color: 'hsl(var(--muted-foreground))', marginBottom: '4px' }}>
+            Trading Balance
+          </p>
+          <p style={{ fontSize: '1.5rem', fontWeight: '600' }}>
+            {formatMoney(state?.balance || 0)}
+          </p>
+        </div>
+        <div style={{ 
+          padding: '16px', 
+          background: 'hsl(var(--muted))', 
+          borderRadius: '8px',
+          border: '1px solid hsl(var(--border))'
+        }}>
+          <p style={{ fontSize: '0.875rem', color: 'hsl(var(--muted-foreground))', marginBottom: '4px' }}>
+            Chime Balance
+          </p>
+          <p style={{ fontSize: '1.5rem', fontWeight: '600' }}>
+            {chimeBalance !== null ? formatMoney(chimeBalance) : '—'}
+          </p>
+        </div>
+      </div>
 
-      {/* Chime Direct - Primary Option */}
+      {/* Mode Toggle */}
+      <div style={{ 
+        display: 'flex', 
+        gap: '8px', 
+        marginBottom: '24px',
+        background: 'hsl(var(--muted))',
+        padding: '4px',
+        borderRadius: '8px'
+      }}>
+        <button
+          className="plain-button"
+          onClick={() => setMode('deposit')}
+          style={{
+            flex: 1,
+            background: mode === 'deposit' ? 'hsl(160, 84%, 39%)' : 'transparent',
+            color: mode === 'deposit' ? 'white' : 'hsl(var(--foreground))',
+            fontWeight: '600',
+            border: 'none'
+          }}
+        >
+          💰 Deposit to Trading
+        </button>
+        <button
+          className="plain-button"
+          onClick={() => setMode('withdraw')}
+          style={{
+            flex: 1,
+            background: mode === 'withdraw' ? 'hsl(160, 84%, 39%)' : 'transparent',
+            color: mode === 'withdraw' ? 'white' : 'hsl(var(--foreground))',
+            fontWeight: '600',
+            border: 'none'
+          }}
+        >
+          💳 Withdraw to Chime
+        </button>
+      </div>
+
+      {/* Deposit/Withdraw Form */}
       <div style={{ 
         padding: '20px', 
         marginBottom: '24px',
-        background: 'linear-gradient(135deg, hsl(160, 84%, 39%, 0.15), hsl(160, 84%, 39%, 0.05))',
+        background: mode === 'deposit' 
+          ? 'linear-gradient(135deg, hsl(160, 84%, 39%, 0.15), hsl(160, 84%, 39%, 0.05))'
+          : 'linear-gradient(135deg, hsl(220, 84%, 50%, 0.15), hsl(220, 84%, 50%, 0.05))',
         borderRadius: '12px',
-        border: '2px solid hsl(160, 84%, 39%, 0.4)'
+        border: mode === 'deposit'
+          ? '2px solid hsl(160, 84%, 39%, 0.4)'
+          : '2px solid hsl(220, 84%, 50%, 0.4)'
       }}>
-        <h2 style={{ fontWeight: '600', marginBottom: '8px', color: 'hsl(160, 84%, 39%)' }}>
-          💳 Chime Direct (Fastest)
+        <h2 style={{ fontWeight: '600', marginBottom: '8px', color: mode === 'deposit' ? 'hsl(160, 84%, 39%)' : 'hsl(220, 84%, 50%)' }}>
+          {mode === 'deposit' ? '💰 Deposit from Chime' : '💳 Withdraw to Chime'}
         </h2>
         
         {loadingChime ? (
@@ -330,12 +546,17 @@ export default function Withdraw() {
         ) : chimeDetails?.chime_routing_number ? (
           <>
             <p style={{ color: 'hsl(var(--muted-foreground))', fontSize: '0.9rem', marginBottom: '16px' }}>
+              {mode === 'deposit' 
+                ? `Move money from ${chimeDetails.chime_account_name || 'Chime'} to your trading account`
+                : `Send money from trading account to ${chimeDetails.chime_account_name || 'Chime'}`}
+            </p>
+            <p style={{ color: 'hsl(var(--muted-foreground))', fontSize: '0.85rem', marginBottom: '16px' }}>
               Connected: {chimeDetails.chime_account_name || 'Chime'} (••••{chimeDetails.chime_account_number?.slice(-4)})
             </p>
             
             <div style={{ marginBottom: '16px' }}>
               <label style={{ display: 'block', marginBottom: '4px', fontWeight: '500' }}>
-                Amount to Withdraw
+                Amount {mode === 'deposit' ? 'to Deposit' : 'to Withdraw'}
               </label>
               <input
                 type="number"
@@ -347,27 +568,32 @@ export default function Withdraw() {
                 step="0.01"
                 style={{ fontSize: '1.2rem', padding: '12px' }}
               />
+              <p style={{ fontSize: '0.75rem', color: 'hsl(var(--muted-foreground))', marginTop: '4px' }}>
+                {mode === 'deposit' 
+                  ? `Available in Chime: ${chimeBalance !== null ? formatMoney(chimeBalance) : 'Loading...'}`
+                  : `Available in Trading: ${formatMoney(state?.balance || 0)}`}
+              </p>
             </div>
             
             <button
               className="plain-button"
-              onClick={handleChimeDirectWithdraw}
+              onClick={mode === 'deposit' ? handleChimeDeposit : handleChimeDirectWithdraw}
               disabled={submitting || !amount}
               style={{ 
                 fontWeight: '600', 
-                background: 'hsl(160, 84%, 39%)', 
+                background: mode === 'deposit' ? 'hsl(160, 84%, 39%)' : 'hsl(220, 84%, 50%)', 
                 color: 'white',
                 padding: '14px 24px',
                 fontSize: '1rem'
               }}
             >
-              {submitting ? 'Processing...' : `Withdraw to Chime`}
+              {submitting ? 'Processing...' : mode === 'deposit' ? 'Deposit to Trading Account' : 'Withdraw to Chime'}
             </button>
           </>
         ) : (
           <div>
             <p style={{ color: 'hsl(var(--muted-foreground))', marginBottom: '12px' }}>
-              Connect your Chime account to enable instant withdrawals.
+              Connect your Chime account to enable deposits and withdrawals.
             </p>
             <button
               className="plain-button"
@@ -438,27 +664,45 @@ export default function Withdraw() {
         </p>
       )}
 
-      {/* Recent Withdrawals */}
+      {/* Recent Transactions */}
       {withdrawals.length > 0 && (
         <div style={{ marginTop: '32px' }}>
           <h2 className="medium-text" style={{ fontWeight: '600', marginBottom: '12px' }}>
-            Recent Withdrawals
+            Recent Transactions
           </h2>
-          {withdrawals.map((w) => (
-            <div 
-              key={w.id} 
-              style={{ 
-                padding: '12px', 
-                borderBottom: '1px solid hsl(var(--border))',
-                marginBottom: '8px' 
-              }}
-            >
-              <p style={{ fontWeight: '500' }}>{formatMoney(w.amount)}</p>
-              <p style={{ color: 'hsl(var(--muted-foreground))', fontSize: '0.875rem' }}>
-                {w.withdraw_type === 'chime_direct' && '💳 '}{w.bank_name || w.withdraw_type || 'Bank'} • {w.status} • {new Date(w.created_at).toLocaleDateString()}
-              </p>
-            </div>
-          ))}
+          {withdrawals.map((w) => {
+            const isDeposit = w.withdraw_type === 'deposit';
+            return (
+              <div 
+                key={w.id} 
+                style={{ 
+                  padding: '12px', 
+                  borderBottom: '1px solid hsl(var(--border))',
+                  marginBottom: '8px',
+                  background: isDeposit ? 'hsl(160, 84%, 39%, 0.05)' : 'transparent'
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <p style={{ fontWeight: '500' }}>
+                      {isDeposit ? '💰 ' : '💳 '}
+                      {isDeposit ? 'Deposit' : 'Withdrawal'}: {formatMoney(w.amount)}
+                    </p>
+                    <p style={{ color: 'hsl(var(--muted-foreground))', fontSize: '0.875rem' }}>
+                      {w.bank_name || 'Bank'} • {w.status} • {new Date(w.created_at).toLocaleDateString()}
+                    </p>
+                  </div>
+                  <p style={{ 
+                    fontSize: '0.875rem', 
+                    fontWeight: '600',
+                    color: isDeposit ? 'hsl(160, 84%, 39%)' : 'hsl(220, 84%, 50%)'
+                  }}>
+                    {isDeposit ? '↓ In' : '↑ Out'}
+                  </p>
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

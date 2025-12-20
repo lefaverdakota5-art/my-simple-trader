@@ -1731,6 +1731,90 @@ async def plaid_withdraw(
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
+
+@app.post("/deposit/from_chime")
+async def deposit_from_chime(
+    body: dict[str, Any],
+    authorization: str | None = Header(default=None),
+) -> JSONResponse:
+    """
+    Deposit money from Chime account to trading account.
+    This updates the trader_state balance and creates a deposit record.
+    Note: This is a virtual deposit for MVP - actual ACH transfers would require Plaid Transfer API.
+    """
+    if not authorization or not authorization.lower().startswith("bearer "):
+        return JSONResponse({"error": "Missing Authorization Bearer token"}, status_code=401)
+    user_id = _supabase_user_id_from_jwt(authorization.split(" ", 1)[1])
+    if not user_id:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    amount = body.get("amount")
+    try:
+        amount_num = float(amount)
+    except Exception:
+        amount_num = 0.0
+    if amount_num <= 0:
+        return JSONResponse({"error": "amount must be a positive number"}, status_code=400)
+
+    if not SETTINGS.supabase_url or not SETTINGS.supabase_service_role_key:
+        return JSONResponse({"error": "Supabase not configured"}, status_code=500)
+
+    try:
+        # Get current trader state
+        endpoint = f"{SETTINGS.supabase_url.rstrip('/')}/rest/v1/trader_state"
+        headers = {
+            "apikey": SETTINGS.supabase_service_role_key,
+            "Authorization": f"Bearer {SETTINGS.supabase_service_role_key}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }
+        
+        # Fetch current balance
+        params = {"select": "balance", "user_id": f"eq.{user_id}"}
+        r = requests.get(endpoint, headers=headers, params=params, timeout=10)
+        r.raise_for_status()
+        rows = r.json() or []
+        current_balance = float(rows[0]["balance"]) if rows else 0.0
+        
+        # Update balance by adding deposit amount
+        new_balance = current_balance + amount_num
+        
+        # Upsert trader_state with new balance
+        upsert_data = {
+            "user_id": user_id,
+            "balance": new_balance,
+            "updated_at": datetime.now(tz=UTC).isoformat(),
+        }
+        r = requests.post(
+            endpoint,
+            headers={**headers, "Prefer": "resolution=merge-duplicates"},
+            json=upsert_data,
+            timeout=10,
+        )
+        r.raise_for_status()
+        
+        # Create deposit record in withdrawal_requests table
+        withdrawal_endpoint = f"{SETTINGS.supabase_url.rstrip('/')}/rest/v1/withdrawal_requests"
+        deposit_record = {
+            "user_id": user_id,
+            "amount": amount_num,
+            "status": "completed",
+            "withdraw_type": "deposit",
+            "bank_name": "Chime",
+        }
+        r = requests.post(withdrawal_endpoint, headers=headers, json=deposit_record, timeout=10)
+        r.raise_for_status()
+        
+        return JSONResponse({
+            "success": True,
+            "amount": amount_num,
+            "new_balance": new_balance,
+            "message": f"Successfully deposited ${amount_num:.2f} from Chime to trading account",
+        })
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 if __name__ == "__main__":
     import uvicorn
 
