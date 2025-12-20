@@ -19,6 +19,83 @@ function envBool(name: string, fallback: boolean) {
   return ["1", "true", "t", "yes", "y", "on"].includes(v.trim().toLowerCase());
 }
 
+// =============================================================================
+// INPUT VALIDATION HELPERS - Bounds checking for all numeric parameters
+// =============================================================================
+
+/**
+ * Clamps a number within specified bounds
+ * Returns fallback if value is null/undefined/NaN
+ */
+function clampNumber(value: unknown, min: number, max: number, fallback: number): number {
+  if (value === null || value === undefined) return fallback;
+  const num = Number(value);
+  if (isNaN(num)) return fallback;
+  return Math.max(min, Math.min(max, num));
+}
+
+/**
+ * Validates and clamps trading configuration parameters
+ */
+interface TradingConfig {
+  takeProfitPercent: number;
+  stopLossPercent: number;
+  trailingStopPercent: number | null;
+  maxPositionPercent: number;
+}
+
+function validateTradingConfig(keys: Record<string, unknown> | null): TradingConfig {
+  // Safe bounds for trading parameters
+  // Take profit: 0.1% to 1000% (allow very tight to very wide)
+  const takeProfitPercent = clampNumber(keys?.default_take_profit_percent, 0.1, 1000, 10);
+  
+  // Stop loss: 0.1% to 100% (never more than 100% as that makes no sense)
+  const stopLossPercent = clampNumber(keys?.default_stop_loss_percent, 0.1, 100, 5);
+  
+  // Trailing stop: 0.1% to 50% (if enabled)
+  let trailingStopPercent: number | null = null;
+  if (keys?.trailing_stop_percent !== null && keys?.trailing_stop_percent !== undefined) {
+    const rawTrailing = Number(keys.trailing_stop_percent);
+    if (!isNaN(rawTrailing) && rawTrailing > 0) {
+      trailingStopPercent = Math.max(0.1, Math.min(50, rawTrailing));
+    }
+  }
+  
+  // Max position: 0.1% to 100% of portfolio
+  const maxPositionPercent = clampNumber(keys?.max_position_percent, 0.1, 100, 10);
+  
+  return {
+    takeProfitPercent,
+    stopLossPercent,
+    trailingStopPercent,
+    maxPositionPercent,
+  };
+}
+
+/**
+ * Validates order size is within reasonable bounds
+ * Min: $1, Max: $1,000,000 per order
+ */
+function validateOrderSize(amount: number, portfolioValue: number, maxPositionPercent: number): number {
+  const MIN_ORDER = 1;
+  const MAX_ORDER = 1_000_000;
+  const MAX_PERCENT_OF_PORTFOLIO = 100;
+  
+  // Ensure order doesn't exceed portfolio percentage
+  const maxByPercent = portfolioValue > 0 
+    ? portfolioValue * (Math.min(maxPositionPercent, MAX_PERCENT_OF_PORTFOLIO) / 100)
+    : MAX_ORDER;
+  
+  const clampedAmount = Math.max(MIN_ORDER, Math.min(MAX_ORDER, amount, maxByPercent));
+  
+  // Log if clamping occurred
+  if (clampedAmount !== amount) {
+    console.log(`[validation] Order size clamped: $${amount.toFixed(2)} -> $${clampedAmount.toFixed(2)}`);
+  }
+  
+  return clampedAmount;
+}
+
 async function krakenPctChange(pair: string): Promise<number> {
   const r = await fetch(`https://api.kraken.com/0/public/Ticker?pair=${encodeURIComponent(pair)}`);
   const data = (await r.json()) as { error?: unknown; result?: Record<string, unknown> };
@@ -2448,12 +2525,12 @@ serve(async (req) => {
       }
 
       try {
-        // Get user's TP/SL/Position sizing settings
-        const userTakeProfitPercent = Number(keys?.default_take_profit_percent ?? 10);
-        const userStopLossPercent = Number(keys?.default_stop_loss_percent ?? 5);
-        const userTrailingStopPercent = keys?.trailing_stop_percent ? Number(keys.trailing_stop_percent) : null;
-        const userMaxPositionPercent = Number(keys?.max_position_percent ?? 10);
-        const trailingEnabled = userTrailingStopPercent !== null && userTrailingStopPercent > 0;
+        // Get user's TP/SL/Position sizing settings with validation
+        const tradingConfig = validateTradingConfig(keys as Record<string, unknown> | null);
+        const { takeProfitPercent, stopLossPercent, trailingStopPercent, maxPositionPercent } = tradingConfig;
+        const trailingEnabled = trailingStopPercent !== null && trailingStopPercent > 0;
+        
+        console.log(`[bot-tick] Validated trading config: TP=${takeProfitPercent}%, SL=${stopLossPercent}%, Trail=${trailingStopPercent ?? 'off'}%, MaxPos=${maxPositionPercent}%`);
 
         // Get user's portfolio value to calculate position size
         const { data: traderState } = await supabaseAdmin
@@ -2462,16 +2539,16 @@ serve(async (req) => {
           .eq("user_id", userId)
           .maybeSingle();
         
-        const portfolioValue = Number(traderState?.portfolio_value ?? traderState?.balance ?? 0);
+        const portfolioValue = clampNumber(traderState?.portfolio_value ?? traderState?.balance, 0, 1e12, 0);
         
-        // Calculate max position size based on portfolio percentage
+        // Calculate and validate order size
         const maxPositionUsd = portfolioValue > 0 
-          ? Math.min(portfolioValue * (userMaxPositionPercent / 100), notionalUsd)
+          ? Math.min(portfolioValue * (maxPositionPercent / 100), notionalUsd)
           : notionalUsd;
         
-        const actualOrderSize = Math.max(maxPositionUsd, 10); // Minimum $10 to avoid tiny orders
+        const actualOrderSize = validateOrderSize(Math.max(maxPositionUsd, 10), portfolioValue, maxPositionPercent);
         
-        console.log(`[bot-tick] Position sizing: Portfolio $${portfolioValue.toFixed(2)}, Max ${userMaxPositionPercent}% = $${maxPositionUsd.toFixed(2)}, Order: $${actualOrderSize.toFixed(2)}`);
+        console.log(`[bot-tick] Position sizing: Portfolio $${portfolioValue.toFixed(2)}, Max ${maxPositionPercent}% = $${maxPositionUsd.toFixed(2)}, Order: $${actualOrderSize.toFixed(2)}`);
 
         // First, check existing positions and execute take-profit/stop-loss/trailing-stop
         const positionCheckResult = await checkAndClosePositions({
@@ -2480,7 +2557,7 @@ serve(async (req) => {
           krakenKey: String(keys?.kraken_key || ""),
           krakenSecret: String(keys?.kraken_secret || ""),
           allowLive,
-          trailingStopPercent: userTrailingStopPercent || undefined,
+          trailingStopPercent: trailingStopPercent || undefined,
         });
 
         // Log position check results
@@ -2499,7 +2576,7 @@ serve(async (req) => {
           volumeUsd: actualOrderSize,
         });
 
-        // Create position record for tracking with user's configured TP/SL and trailing stop
+        // Create position record for tracking with validated TP/SL and trailing stop
         await (supabaseAdmin.from("positions") as any).insert({
           user_id: userId,
           symbol: bestPair.symbol,
@@ -2508,11 +2585,11 @@ serve(async (req) => {
           quantity: orderResult.volume,
           entry_price: orderResult.price,
           current_price: orderResult.price,
-          take_profit_percent: userTakeProfitPercent,
-          stop_loss_percent: userStopLossPercent,
+          take_profit_percent: takeProfitPercent,
+          stop_loss_percent: stopLossPercent,
           trailing_stop_enabled: trailingEnabled,
           high_water_mark: orderResult.price,
-          trailing_stop_price: trailingEnabled ? orderResult.price * (1 - (userTrailingStopPercent || 3) / 100) : null,
+          trailing_stop_price: trailingEnabled ? orderResult.price * (1 - (trailingStopPercent || 3) / 100) : null,
           status: "open",
           entry_txid: orderResult.txid.join(","),
         });
@@ -2527,11 +2604,11 @@ serve(async (req) => {
           { onConflict: "user_id,day" },
         );
 
-        const trailInfo = trailingEnabled ? ` • Trail: ${userTrailingStopPercent}%` : "";
-        const positionInfo = portfolioValue > 0 ? ` (${userMaxPositionPercent}% of portfolio)` : "";
+        const trailInfo = trailingEnabled ? ` • Trail: ${trailingStopPercent}%` : "";
+        const positionInfo = portfolioValue > 0 ? ` (${maxPositionPercent}% of portfolio)` : "";
         await supabaseAdmin.rpc("update_trader_state_from_webhook", {
           p_user_id: userId,
-          p_trade_message: `🚀 BOUGHT ${bestPair.symbol} (${krakenPair}) ${orderResult.volume.toFixed(6)} @ $${orderResult.price.toFixed(2)} ($${actualOrderSize.toFixed(2)}${positionInfo}) • TP: ${userTakeProfitPercent}% / SL: ${userStopLossPercent}%${trailInfo} • txid: ${orderResult.txid.join(",")}`,
+          p_trade_message: `🚀 BOUGHT ${bestPair.symbol} (${krakenPair}) ${orderResult.volume.toFixed(6)} @ $${orderResult.price.toFixed(2)} ($${actualOrderSize.toFixed(2)}${positionInfo}) • TP: ${takeProfitPercent}% / SL: ${stopLossPercent}%${trailInfo} • txid: ${orderResult.txid.join(",")}`,
         });
 
         results.push({ 
