@@ -6,6 +6,12 @@ import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/hooks/use-toast';
 import { getBotApiBaseUrl, getKrakenWithdrawAsset, getKrakenWithdrawKeyUsd, getSupabaseAccessToken } from "@/lib/botApi";
 
+interface ChimeDetails {
+  chime_routing_number: string | null;
+  chime_account_number: string | null;
+  chime_account_name: string | null;
+}
+
 export default function Withdraw() {
   const { user, loading: authLoading } = useAuth();
   const { state, loading: stateLoading } = useTraderState(user?.id || null);
@@ -13,17 +19,21 @@ export default function Withdraw() {
   const botApiBase = getBotApiBaseUrl();
   
   const [amount, setAmount] = useState('');
-  const [withdrawType, setWithdrawType] = useState('bank');
+  const [withdrawType, setWithdrawType] = useState('chime_direct');
   const [submitting, setSubmitting] = useState(false);
   const [withdrawals, setWithdrawals] = useState<WithdrawalRequest[]>([]);
   const [krakenKey, setKrakenKey] = useState("");
   const [krakenAsset, setKrakenAsset] = useState("ZUSD");
+  const [chimeDetails, setChimeDetails] = useState<ChimeDetails | null>(null);
+  const [loadingChime, setLoadingChime] = useState(true);
 
   interface WithdrawalRequest {
     id: string;
     amount: number;
     status: string;
     created_at: string;
+    withdraw_type?: string;
+    bank_name?: string;
   }
 
   useEffect(() => {
@@ -32,22 +42,36 @@ export default function Withdraw() {
     }
   }, [user, authLoading, navigate]);
 
-  // Fetch existing withdrawal requests
+  // Fetch existing withdrawal requests and Chime details
   useEffect(() => {
     if (!user) return;
     
-    const fetchWithdrawals = async () => {
-      const { data } = await supabase
+    const fetchData = async () => {
+      // Fetch withdrawals
+      const { data: withdrawalData } = await supabase
         .from('withdrawal_requests')
         .select('*')
         .eq('user_id', user.id)
         .order('created_at', { ascending: false })
         .limit(10);
       
-      if (data) setWithdrawals(data);
+      if (withdrawalData) setWithdrawals(withdrawalData);
+      
+      // Fetch Chime details
+      setLoadingChime(true);
+      const { data: keysData } = await supabase
+        .from('user_exchange_keys')
+        .select('chime_routing_number, chime_account_number, chime_account_name')
+        .eq('user_id', user.id)
+        .maybeSingle();
+      
+      if (keysData) {
+        setChimeDetails(keysData);
+      }
+      setLoadingChime(false);
     };
 
-    fetchWithdrawals();
+    fetchData();
   }, [user]);
 
   useEffect(() => {
@@ -56,6 +80,78 @@ export default function Withdraw() {
   }, []);
 
   const getAccessToken = async () => getSupabaseAccessToken();
+
+  // Chime Direct withdrawal - creates a withdrawal request with Chime details
+  const handleChimeDirectWithdraw = async () => {
+    if (!user) return;
+    
+    const numAmount = parseFloat(amount);
+    if (isNaN(numAmount) || numAmount <= 0) {
+      toast({
+        title: 'Error',
+        description: 'Please enter a valid amount',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    if (!chimeDetails?.chime_routing_number || !chimeDetails?.chime_account_number) {
+      toast({
+        title: 'Chime Not Connected',
+        description: 'Please connect your Chime account in Settings first.',
+        variant: 'destructive',
+      });
+      navigate('/settings');
+      return;
+    }
+
+    if (numAmount > (state?.balance || 0)) {
+      toast({
+        title: 'Error',
+        description: 'Insufficient balance',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setSubmitting(true);
+
+    const { error } = await supabase
+      .from('withdrawal_requests')
+      .insert({
+        user_id: user.id,
+        amount: numAmount,
+        status: 'pending',
+        withdraw_type: 'chime_direct',
+        bank_name: chimeDetails.chime_account_name || 'Chime',
+      });
+
+    if (error) {
+      toast({
+        title: 'Error',
+        description: error.message,
+        variant: 'destructive',
+      });
+    } else {
+      toast({
+        title: '✅ Withdrawal Submitted!',
+        description: `$${numAmount.toFixed(2)} will be sent to your Chime account (${chimeDetails.chime_account_name || 'Chime'})`,
+      });
+      setAmount('');
+      
+      // Refresh withdrawals list
+      const { data } = await supabase
+        .from('withdrawal_requests')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(10);
+      
+      if (data) setWithdrawals(data);
+    }
+
+    setSubmitting(false);
+  };
 
   const handleSellToCash = async () => {
     if (!botApiBase) {
@@ -80,47 +176,6 @@ export default function Withdraw() {
         toast({ title: "Sell to cash failed", description: data?.error || "Unknown error", variant: "destructive" });
       } else {
         toast({ title: "Sell to cash started", description: "Check Recent Trades / broker for fills." });
-      }
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleWithdrawViaPlaid = async () => {
-    if (!botApiBase) {
-      toast({
-        title: "Backend not configured",
-        description: "Set VITE_BOT_API_URL so the app can reach your bot service.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    const numAmount = parseFloat(amount);
-    if (isNaN(numAmount) || numAmount <= 0) {
-      toast({
-        title: 'Error',
-        description: 'Please enter a valid amount',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    const token = await getAccessToken();
-    if (!token) return;
-
-    setSubmitting(true);
-    try {
-      const r = await fetch(`${botApiBase}/plaid/withdraw`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ amount: numAmount, destination: withdrawType }),
-      });
-      const data = await r.json();
-      if (!r.ok) {
-        toast({ title: "Withdrawal failed", description: data?.error || "Unknown error", variant: "destructive" });
-      } else {
-        toast({ title: "Withdrawal submitted", description: "If enabled, Plaid Transfer will process the payout." });
       }
     } finally {
       setSubmitting(false);
@@ -258,73 +313,123 @@ export default function Withdraw() {
         Available Balance: {formatMoney(state?.balance || 0)}
       </p>
 
-      {/* Amount Input */}
-      <div style={{ marginBottom: '16px' }}>
-        <label style={{ display: 'block', marginBottom: '4px', fontWeight: '500' }}>
-          Amount
-        </label>
-        <input
-          type="number"
-          className="plain-input"
-          value={amount}
-          onChange={(e) => setAmount(e.target.value)}
-          placeholder="0.00"
-          min="0"
-          step="0.01"
-        />
+      {/* Chime Direct - Primary Option */}
+      <div style={{ 
+        padding: '20px', 
+        marginBottom: '24px',
+        background: 'linear-gradient(135deg, hsl(160, 84%, 39%, 0.15), hsl(160, 84%, 39%, 0.05))',
+        borderRadius: '12px',
+        border: '2px solid hsl(160, 84%, 39%, 0.4)'
+      }}>
+        <h2 style={{ fontWeight: '600', marginBottom: '8px', color: 'hsl(160, 84%, 39%)' }}>
+          💳 Chime Direct (Fastest)
+        </h2>
+        
+        {loadingChime ? (
+          <p style={{ color: 'hsl(var(--muted-foreground))' }}>Loading...</p>
+        ) : chimeDetails?.chime_routing_number ? (
+          <>
+            <p style={{ color: 'hsl(var(--muted-foreground))', fontSize: '0.9rem', marginBottom: '16px' }}>
+              Connected: {chimeDetails.chime_account_name || 'Chime'} (••••{chimeDetails.chime_account_number?.slice(-4)})
+            </p>
+            
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'block', marginBottom: '4px', fontWeight: '500' }}>
+                Amount to Withdraw
+              </label>
+              <input
+                type="number"
+                className="plain-input"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                placeholder="0.00"
+                min="0"
+                step="0.01"
+                style={{ fontSize: '1.2rem', padding: '12px' }}
+              />
+            </div>
+            
+            <button
+              className="plain-button"
+              onClick={handleChimeDirectWithdraw}
+              disabled={submitting || !amount}
+              style={{ 
+                fontWeight: '600', 
+                background: 'hsl(160, 84%, 39%)', 
+                color: 'white',
+                padding: '14px 24px',
+                fontSize: '1rem'
+              }}
+            >
+              {submitting ? 'Processing...' : `Withdraw to Chime`}
+            </button>
+          </>
+        ) : (
+          <div>
+            <p style={{ color: 'hsl(var(--muted-foreground))', marginBottom: '12px' }}>
+              Connect your Chime account to enable instant withdrawals.
+            </p>
+            <button
+              className="plain-button"
+              onClick={() => navigate('/settings')}
+              style={{ fontWeight: '600', background: 'hsl(160, 84%, 39%)', color: 'white' }}
+            >
+              Connect Chime in Settings
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* Withdraw Type */}
-      <div style={{ marginBottom: '24px' }}>
-        <label style={{ display: 'block', marginBottom: '4px', fontWeight: '500' }}>
-          Withdraw To
-        </label>
-        <select
-          className="plain-input"
-          value={withdrawType}
-          onChange={(e) => setWithdrawType(e.target.value)}
-        >
-          <option value="chime">Chime Account</option>
-          <option value="bank">Other Bank (cash)</option>
-          <option value="convert">Convert Crypto to USD first</option>
-        </select>
-      </div>
+      {/* Other Withdrawal Methods */}
+      <details style={{ marginBottom: '24px' }}>
+        <summary style={{ cursor: 'pointer', fontWeight: '600', marginBottom: '12px' }}>
+          Other Withdrawal Methods
+        </summary>
+        
+        <div style={{ padding: '16px', background: 'hsl(var(--muted))', borderRadius: '8px', marginTop: '12px' }}>
+          <div style={{ marginBottom: '16px' }}>
+            <label style={{ display: 'block', marginBottom: '4px', fontWeight: '500' }}>
+              Amount
+            </label>
+            <input
+              type="number"
+              className="plain-input"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              placeholder="0.00"
+              min="0"
+              step="0.01"
+            />
+          </div>
 
-      <button
-        className="plain-button"
-        onClick={handleSellToCash}
-        disabled={submitting}
-        style={{ marginBottom: '8px', fontWeight: '600' }}
-      >
-        {submitting ? 'Please wait...' : 'Sell All Positions to Cash'}
-      </button>
+          <button
+            className="plain-button"
+            onClick={handleSellToCash}
+            disabled={submitting}
+            style={{ marginBottom: '8px', fontWeight: '600', width: '100%' }}
+          >
+            {submitting ? 'Please wait...' : 'Sell All Positions to Cash'}
+          </button>
 
-      <button
-        className="plain-button"
-        onClick={handleWithdrawViaPlaid}
-        disabled={submitting}
-        style={{ marginBottom: '16px', fontWeight: '600' }}
-      >
-        {submitting ? 'Please wait...' : 'Withdraw via Plaid (if enabled)'}
-      </button>
+          <button
+            className="plain-button"
+            onClick={handleWithdrawViaKraken}
+            disabled={submitting}
+            style={{ marginBottom: '8px', fontWeight: '600', width: '100%' }}
+          >
+            {submitting ? 'Please wait...' : 'Withdraw USD via Kraken'}
+          </button>
 
-      <button
-        className="plain-button"
-        onClick={handleWithdrawViaKraken}
-        disabled={submitting}
-        style={{ marginBottom: '16px', fontWeight: '600' }}
-      >
-        {submitting ? 'Please wait...' : 'Withdraw USD via Kraken (if enabled)'}
-      </button>
-
-      <button
-        className="plain-button"
-        onClick={handleWithdraw}
-        disabled={submitting}
-        style={{ fontWeight: '600' }}
-      >
-        {submitting ? 'Processing...' : 'Confirm Withdraw'}
-      </button>
+          <button
+            className="plain-button"
+            onClick={handleWithdraw}
+            disabled={submitting}
+            style={{ fontWeight: '600', width: '100%' }}
+          >
+            {submitting ? 'Processing...' : 'Submit Withdrawal Request'}
+          </button>
+        </div>
+      </details>
 
       {/* Withdrawal Status */}
       {state?.withdraw_status && (
@@ -350,7 +455,7 @@ export default function Withdraw() {
             >
               <p style={{ fontWeight: '500' }}>{formatMoney(w.amount)}</p>
               <p style={{ color: 'hsl(var(--muted-foreground))', fontSize: '0.875rem' }}>
-                Status: {w.status} • {new Date(w.created_at).toLocaleDateString()}
+                {w.withdraw_type === 'chime_direct' && '💳 '}{w.bank_name || w.withdraw_type || 'Bank'} • {w.status} • {new Date(w.created_at).toLocaleDateString()}
               </p>
             </div>
           ))}
