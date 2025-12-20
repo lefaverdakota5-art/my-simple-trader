@@ -55,6 +55,43 @@ cp .env.example .env
 # Edit .env with your API keys
 ```
 
+### Supabase Configuration
+
+**IMPORTANT:** Before running the app, you must configure your Supabase API keys correctly to enable authentication.
+
+#### Getting Your Supabase Anon Key
+
+1. **Go to the Supabase Dashboard**
+   - Navigate to: https://supabase.com/dashboard/project/whdljtbtqisoszbrzdwq/settings/api
+   - Log in with your Supabase account
+
+2. **Copy the Anon/Public Key**
+   - Under "Project API keys", find the **anon public** key
+   - Click the copy icon to copy the key to your clipboard
+   - It should be a JWT token starting with `eyJ...`
+
+3. **Update Your `.env` File**
+   - Open `.env` in your project root
+   - Replace `YOUR_ANON_PUBLIC_KEY_HERE` with the key you copied
+   - Example:
+     ```dotenv
+     VITE_SUPABASE_PUBLISHABLE_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+     ```
+
+4. **Verify the Configuration**
+   - Make sure the `ref` field in your JWT matches the project ID `whdljtbtqisoszbrzdwq`
+   - You can decode your JWT at https://jwt.io to verify
+
+#### Troubleshooting Authentication Issues
+
+If you see "wrong api key" errors:
+- ✅ Verify you copied the **anon public** key (not the service role key)
+- ✅ Check that the key is from the project `whdljtbtqisoszbrzdwq`
+- ✅ Ensure there are no extra spaces or quotes in the `.env` file
+- ✅ Restart your development server after updating `.env`
+
+```
+
 ### Running Locally
 
 **Web Development:**
@@ -130,9 +167,11 @@ All API keys can be configured dynamically through the app's Settings page:
    - Optional but recommended for intelligent trading
    - Supports GPT-4o-mini (default) and other models
 
-5. **Supabase** (Database)
-   - Already configured in `.env`
-   - Project ID and API keys included
+5. **Supabase** (Database & Authentication)
+   - **REQUIRED** for app to function
+   - Get your anon/public key from https://supabase.com/dashboard/project/whdljtbtqisoszbrzdwq/settings/api
+   - Copy the "anon public" key and update `VITE_SUPABASE_PUBLISHABLE_KEY` in `.env`
+   - See the "Supabase Configuration" section above for detailed setup instructions
 
 ### Backend Configuration
 
