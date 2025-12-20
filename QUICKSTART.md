@@ -18,7 +18,7 @@ This guide helps you get the AI Trader app running on your Samsung Galaxy S20.
 3. Select this repository
 4. Add environment variables:
    ```
-   SUPABASE_URL=https://pchaijknfmrddivqjesm.supabase.co
+   SUPABASE_URL=https://whdljtbtqisoszbrzdwq.supabase.co
    SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
    SUPABASE_PUSH_UPDATE_URL=your_edge_function_url
    
@@ -61,7 +61,7 @@ This guide helps you get the AI Trader app running on your Samsung Galaxy S20.
 ## Step 4: Configure Supabase (One-Time)
 
 1. Go to [Supabase Dashboard](https://supabase.com/dashboard)
-2. Select your project: `pchaijknfmrddivqjesm`
+2. Select your project: `whdljtbtqisoszbrzdwq`
 3. Go to SQL Editor
 4. Run these migrations if not already done:
    - `supabase/migrations/20251215023500_plaid_tables.sql`
