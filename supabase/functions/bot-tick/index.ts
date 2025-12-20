@@ -651,6 +651,56 @@ Respond with ONLY JSON: {"vote":"YES" or "NO","reason":"Brief compound analysis 
   });
 }
 
+// Effect AI - Special multi-dimensional analysis combining technical, sentiment, and macro effects
+async function effectAiVote(opts: {
+  pct: number;
+  krakenPair: string;
+  symbol: string;
+  ordersLeft: boolean;
+  ohlc: { high: number; low: number; volume: number };
+  assetType?: string;
+}): Promise<{ vote: boolean; reason: string } | null> {
+  const volatility = opts.ohlc.high > 0 && opts.ohlc.low > 0 
+    ? ((opts.ohlc.high - opts.ohlc.low) / opts.ohlc.low * 100).toFixed(2) 
+    : "unknown";
+  const assetLabel = opts.assetType === "stock" ? "Stock/ETF" : "Crypto";
+
+  return lovableAiVote({
+    name: "effect-ai",
+    model: "google/gemini-2.5-pro", // Pro model for deep multi-dimensional analysis
+    systemPrompt: "You are Effect AI - a special council member that analyzes the combined EFFECT of multiple market forces. You weight votes carefully and only approve high-conviction trades. Respond with valid JSON only.",
+    userPrompt: `You are "Effect AI" - the SPECIAL COUNCIL MEMBER that analyzes the combined EFFECT of all market forces.
+
+Your vote carries significant weight. Only vote YES for HIGH-CONVICTION trades.
+
+Market Data:
+- Asset: ${opts.symbol} (${assetLabel}: ${opts.krakenPair})
+- Today's change: ${opts.pct.toFixed(2)}%
+- 24h Volatility: ${volatility}%
+- 24h High: $${opts.ohlc.high.toFixed(2)}
+- 24h Low: $${opts.ohlc.low.toFixed(2)}
+- Volume: ${opts.ohlc.volume.toFixed(2)}
+- Can trade: ${opts.ordersLeft ? "Yes" : "No"}
+
+MULTI-DIMENSIONAL EFFECT ANALYSIS:
+1. **Technical Effect**: Price action, support/resistance, volume profile
+2. **Sentiment Effect**: Fear/greed, social momentum, news flow
+3. **Macro Effect**: Fed policy, economic data, sector rotation
+4. **Timing Effect**: Session timing, volatility regime, liquidity conditions
+5. **Risk Effect**: Position sizing, correlation, portfolio impact
+${opts.assetType === "stock" ? "6. **Fundamental Effect**: P/E ratio, earnings, institutional ownership" : "6. **On-Chain Effect**: Network activity, whale movements, exchange flows"}
+
+EFFECT SCORING (you weight each factor):
+- Positive effects > Negative effects = Consider YES
+- Uncertainty or mixed signals = Vote NO
+- High conviction required (>70% confidence) = Vote YES
+- Path to $10M goal requires disciplined entries
+
+Only vote YES if the COMBINED EFFECT of all factors is clearly bullish.
+Respond with ONLY JSON: {"vote":"YES" or "NO","reason":"Brief effect analysis (max 50 chars)"}`,
+  });
+}
+
 // Perplexity Real-Time News Search - Gets live market news for sentiment (stocks & crypto)
 async function perplexityNewsVote(opts: {
   pct: number;
@@ -2381,6 +2431,8 @@ serve(async (req) => {
         pennyHunterResult,
         etfMomentumResult,
         compoundGrowthResult,
+        // SPECIAL COUNCIL MEMBER - Effect AI
+        effectAiResult,
       ] = await Promise.all([
         topTraderAnalystVote(aiContext),
         newsSentimentVote(aiContext),
@@ -2411,6 +2463,8 @@ serve(async (req) => {
         pennyStockHunterVote(ohlcContext),
         etfMomentumRiderVote(ohlcContext),
         compoundGrowthVote(aiContext),
+        // SPECIAL COUNCIL MEMBER - Effect AI
+        effectAiVote(ohlcContext),
       ]);
 
       // Add all AI votes
@@ -2444,6 +2498,8 @@ serve(async (req) => {
         { result: pennyHunterResult, name: "Penny/Meme Hunter" },
         { result: etfMomentumResult, name: "ETF Momentum Rider" },
         { result: compoundGrowthResult, name: "Compound Growth AI" },
+        // SPECIAL COUNCIL MEMBER - Effect AI (carries significant weight)
+        { result: effectAiResult, name: "⚡ Effect AI (Special)" },
       ];
 
       for (const { result, name } of aiVotes) {
@@ -2463,35 +2519,20 @@ serve(async (req) => {
       }
 
       // Recalculate approval with all members
-      // ULTRA-AGGRESSIVE: Maximum trading frequency for constant micro-gains
-      // Only need 25-35% approval to execute trades - prioritize volume over certainty
+      // CONSERVATIVE: Require 3/4 (75%) council approval before trading
+      // This ensures high-conviction trades only
       
-      const isAnyPositiveSignal = yesVotes >= 2; // At least 2 yes votes
-      const hasAnyMomentum = Math.abs(pct) > 0.1; // Any movement > 0.1%
+      const thresholdPercent = 0.75; // 75% = 3/4 majority required
+      const thresholdReason = "3/4-majority";
       
-      // Ultra-low thresholds for maximum trade execution
-      let thresholdPercent = 0.25; // Default: only 25% needed
-      let thresholdReason = "ultra-aggressive";
+      const threshold = Math.max(Math.ceil(totalMembers * thresholdPercent), 3); // Minimum 3 votes needed
+      console.log(`[bot-tick] CONSERVATIVE 3/4 Threshold: ${(thresholdPercent * 100).toFixed(0)}% (${thresholdReason}) = ${threshold}/${totalMembers} votes needed, got ${yesVotes}`);
       
-      if (notionalUsd < 50) {
-        thresholdPercent = 0.15; // Only 15% for tiny trades under $50
-        thresholdReason = "micro<$50";
-      } else if (notionalUsd < 100) {
-        thresholdPercent = 0.20; // 20% for trades under $100
-        thresholdReason = "micro<$100";
-      } else if (notionalUsd < 250) {
-        thresholdPercent = 0.25; // 25% for trades under $250
-        thresholdReason = "small<$250";
-      } else if (notionalUsd < 500) {
-        thresholdPercent = 0.30; // 30% for trades under $500
-        thresholdReason = "medium<$500";
-      } else {
-        thresholdPercent = 0.35; // 35% for larger trades
-        thresholdReason = "standard";
-      }
-      
-      const threshold = Math.max(Math.ceil(totalMembers * thresholdPercent), 2); // Minimum 2 votes needed
-      console.log(`[bot-tick] ULTRA-AGGRESSIVE Threshold: ${(thresholdPercent * 100).toFixed(0)}% (${thresholdReason}) = ${threshold}/${totalMembers} votes needed, got ${yesVotes}`);
+      c = {
+        votes: `${yesVotes}/${totalMembers}`,
+        reasons: c.reasons,
+        approved: yesVotes >= threshold,
+      };
       
       c = {
         votes: `${yesVotes}/${totalMembers}`,
