@@ -42,6 +42,12 @@ export default function Settings() {
   const [trailingStopPercent, setTrailingStopPercent] = useState(3);
   const [trailingStopEnabled, setTrailingStopEnabled] = useState(false);
   const [maxPositionPercent, setMaxPositionPercent] = useState(10);
+  // Chime Direct
+  const [chimeRoutingNumber, setChimeRoutingNumber] = useState("");
+  const [chimeAccountNumber, setChimeAccountNumber] = useState("");
+  const [chimeAccountName, setChimeAccountName] = useState("Chime Spending");
+  const [savingChime, setSavingChime] = useState(false);
+  const [chimeConnected, setChimeConnected] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submittingTpSl, setSubmittingTpSl] = useState(false);
   const [status, setStatus] = useState<{
@@ -73,7 +79,7 @@ export default function Settings() {
     setKrakenWithdrawAssetState(getKrakenWithdrawAsset());
   }, []);
 
-  // Load current status
+  // Load current status and Chime details
   useEffect(() => {
     async function loadStatus() {
       if (!user) return;
@@ -89,6 +95,26 @@ export default function Settings() {
           if (data.stopLossPercent != null) setStopLossPercent(data.stopLossPercent);
           if (data.trailingStopPercent != null) setTrailingStopPercent(data.trailingStopPercent);
           if (data.maxPositionPercent != null) setMaxPositionPercent(data.maxPositionPercent);
+        }
+        
+        // Load Chime details directly from database
+        const { data: keysData } = await supabase
+          .from("user_exchange_keys")
+          .select("chime_routing_number, chime_account_number, chime_account_name")
+          .eq("user_id", user.id)
+          .maybeSingle();
+        
+        if (keysData) {
+          if (keysData.chime_routing_number) {
+            setChimeRoutingNumber(keysData.chime_routing_number);
+            setChimeConnected(true);
+          }
+          if (keysData.chime_account_number) {
+            setChimeAccountNumber(keysData.chime_account_number);
+          }
+          if (keysData.chime_account_name) {
+            setChimeAccountName(keysData.chime_account_name);
+          }
         }
       } catch (e) {
         console.error("Failed to load status:", e);
@@ -479,6 +505,109 @@ export default function Settings() {
         >
           {submitting ? "Saving..." : "Save Keys"}
         </button>
+      </div>
+
+      {/* Chime Direct - Easy Bank Transfer */}
+      <div style={{ 
+        marginTop: "24px",
+        padding: "20px",
+        background: "linear-gradient(135deg, hsl(160, 84%, 39%, 0.1), hsl(160, 84%, 39%, 0.05))",
+        borderRadius: "12px",
+        border: "1px solid hsl(160, 84%, 39%, 0.3)"
+      }}>
+        <h2 className="medium-text" style={{ fontWeight: 600, marginBottom: "8px", color: "hsl(160, 84%, 39%)" }}>
+          💳 Chime Direct (Easy Withdrawals)
+        </h2>
+        <p style={{ color: "hsl(var(--muted-foreground))", fontSize: "0.9rem", marginBottom: "16px" }}>
+          Enter your Chime routing and account numbers for direct ACH withdrawals. No Plaid setup required!
+          {chimeConnected && <span style={{ color: "hsl(142, 76%, 36%)", marginLeft: "8px" }}>✓ Connected</span>}
+        </p>
+        
+        <div style={{ marginBottom: "12px" }}>
+          <label style={{ display: "block", marginBottom: "4px", fontWeight: 500 }}>
+            Account Name
+          </label>
+          <input
+            className="plain-input"
+            value={chimeAccountName}
+            onChange={(e) => setChimeAccountName(e.target.value)}
+            placeholder="Chime Spending"
+          />
+        </div>
+        
+        <div style={{ display: "flex", gap: "12px", flexWrap: "wrap", marginBottom: "12px" }}>
+          <div style={{ flex: "1", minWidth: "140px" }}>
+            <label style={{ display: "block", marginBottom: "4px", fontWeight: 500 }}>
+              Routing Number
+            </label>
+            <input
+              className="plain-input"
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              maxLength={9}
+              value={chimeRoutingNumber}
+              onChange={(e) => setChimeRoutingNumber(e.target.value.replace(/\D/g, ""))}
+              placeholder="9 digits"
+            />
+          </div>
+          <div style={{ flex: "1", minWidth: "140px" }}>
+            <label style={{ display: "block", marginBottom: "4px", fontWeight: 500 }}>
+              Account Number
+            </label>
+            <input
+              className="plain-input"
+              type="password"
+              inputMode="numeric"
+              value={chimeAccountNumber}
+              onChange={(e) => setChimeAccountNumber(e.target.value.replace(/\D/g, ""))}
+              placeholder="Your account number"
+            />
+          </div>
+        </div>
+        
+        <button
+          className="plain-button"
+          disabled={savingChime || !chimeRoutingNumber || !chimeAccountNumber}
+          onClick={async () => {
+            if (chimeRoutingNumber.length !== 9) {
+              toast({ title: "Invalid Routing Number", description: "Routing number must be 9 digits", variant: "destructive" });
+              return;
+            }
+            if (chimeAccountNumber.length < 4) {
+              toast({ title: "Invalid Account Number", description: "Please enter a valid account number", variant: "destructive" });
+              return;
+            }
+            
+            setSavingChime(true);
+            try {
+              const { error } = await supabase
+                .from("user_exchange_keys")
+                .upsert({
+                  user_id: user!.id,
+                  chime_routing_number: chimeRoutingNumber,
+                  chime_account_number: chimeAccountNumber,
+                  chime_account_name: chimeAccountName || "Chime Spending",
+                }, { onConflict: "user_id" });
+              
+              if (error) {
+                toast({ title: "Failed", description: error.message, variant: "destructive" });
+              } else {
+                setChimeConnected(true);
+                toast({ title: "Chime Connected!", description: "You can now withdraw directly to your Chime account." });
+              }
+            } finally {
+              setSavingChime(false);
+            }
+          }}
+          style={{ fontWeight: 600, background: "hsl(160, 84%, 39%)", color: "white" }}
+        >
+          {savingChime ? "Saving..." : chimeConnected ? "Update Chime Details" : "Connect Chime Account"}
+        </button>
+        
+        <p style={{ color: "hsl(var(--muted-foreground))", fontSize: "0.8rem", marginTop: "12px" }}>
+          🔒 Your bank details are encrypted and stored securely. Find your routing/account numbers in the Chime app under "Move Money" → "Set up direct deposit".
+        </p>
       </div>
 
       <div style={{ marginTop: "24px" }}>

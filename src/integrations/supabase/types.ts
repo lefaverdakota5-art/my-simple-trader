@@ -259,6 +259,9 @@ export type Database = {
           alpaca_api_key: string | null
           alpaca_paper: boolean | null
           alpaca_secret: string | null
+          chime_account_name: string | null
+          chime_account_number: string | null
+          chime_routing_number: string | null
           created_at: string
           default_stop_loss_percent: number | null
           default_take_profit_percent: number | null
@@ -280,6 +283,9 @@ export type Database = {
           alpaca_api_key?: string | null
           alpaca_paper?: boolean | null
           alpaca_secret?: string | null
+          chime_account_name?: string | null
+          chime_account_number?: string | null
+          chime_routing_number?: string | null
           created_at?: string
           default_stop_loss_percent?: number | null
           default_take_profit_percent?: number | null
@@ -301,6 +307,9 @@ export type Database = {
           alpaca_api_key?: string | null
           alpaca_paper?: boolean | null
           alpaca_secret?: string | null
+          chime_account_name?: string | null
+          chime_account_number?: string | null
+          chime_routing_number?: string | null
           created_at?: string
           default_stop_loss_percent?: number | null
           default_take_profit_percent?: number | null
