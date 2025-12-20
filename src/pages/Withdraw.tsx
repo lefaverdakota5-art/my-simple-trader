@@ -29,7 +29,7 @@ interface PlaidAccount {
 
 export default function Withdraw() {
   const { user, loading: authLoading } = useAuth();
-  const { state, loading: stateLoading, refetch: refetchState } = useTraderState(user?.id || null);
+  const { state, loading: stateLoading } = useTraderState(user?.id || null);
   const navigate = useNavigate();
   const botApiBase = getBotApiBaseUrl();
   
@@ -155,7 +155,16 @@ export default function Withdraw() {
     }
 
     // Check against Chime balance if available
-    if (chimeBalance !== null && numAmount > chimeBalance) {
+    if (chimeBalance === null) {
+      toast({
+        title: 'Error',
+        description: 'Chime balance is still loading. Please wait a moment and try again.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    
+    if (numAmount > chimeBalance) {
       toast({
         title: 'Error',
         description: `Insufficient Chime balance. Available: $${chimeBalance.toFixed(2)}`,
@@ -202,8 +211,7 @@ export default function Withdraw() {
         });
         setAmount('');
         
-        // Refresh state and withdrawals list
-        refetchState();
+        // Refresh withdrawals list (the trader_state will update via realtime subscription)
         const { data: withdrawalData } = await supabase
           .from('withdrawal_requests')
           .select('*')
@@ -515,7 +523,7 @@ export default function Withdraw() {
           onClick={() => setMode('withdraw')}
           style={{
             flex: 1,
-            background: mode === 'withdraw' ? 'hsl(160, 84%, 39%)' : 'transparent',
+            background: mode === 'withdraw' ? 'hsl(220, 84%, 50%)' : 'transparent',
             color: mode === 'withdraw' ? 'white' : 'hsl(var(--foreground))',
             fontWeight: '600',
             border: 'none'
