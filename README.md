@@ -62,7 +62,7 @@ cp .env.example .env
 #### Getting Your Supabase Anon Key
 
 1. **Go to the Supabase Dashboard**
-   - Navigate to: https://supabase.com/dashboard/project/whdljtbtqisoszbrzdwq/settings/api
+   - Navigate to: https://supabase.com/dashboard/project/YOUR_PROJECT_ID/settings/api (replace `YOUR_PROJECT_ID` with `whdljtbtqisoszbrzdwq` or your own project ID)
    - Log in with your Supabase account
 
 2. **Copy the Anon/Public Key**
@@ -80,14 +80,14 @@ cp .env.example .env
 
 4. **Verify the Configuration**
    - To verify your key is correct, paste it at https://jwt.io
-   - In the decoded payload, check that `"ref":"whdljtbtqisoszbrzdwq"` matches your project ID
+   - In the decoded payload, check that the `"ref"` field matches your project ID (e.g., `"ref":"whdljtbtqisoszbrzdwq"`)
    - If the `ref` field shows a different project ID, you copied the wrong key
 
 #### Troubleshooting Authentication Issues
 
 If you see "wrong api key" errors:
 - ✅ Verify you copied the **anon public** key (not the service role key)
-- ✅ Check that the key is from the project `whdljtbtqisoszbrzdwq`
+- ✅ Check that the key's `ref` field matches your project ID when decoded at jwt.io
 - ✅ Ensure there are no extra spaces or quotes in the `.env` file
 - ✅ Restart your development server after updating `.env`
 
@@ -168,7 +168,7 @@ All API keys can be configured dynamically through the app's Settings page:
 
 5. **Supabase** (Database & Authentication)
    - **REQUIRED** for app to function
-   - Get your anon/public key from https://supabase.com/dashboard/project/whdljtbtqisoszbrzdwq/settings/api
+   - Get your anon public key from your Supabase project's API settings page
    - Copy the "anon public" key and update `VITE_SUPABASE_PUBLISHABLE_KEY` in `.env`
    - See the "Supabase Configuration" section above for detailed setup instructions
 
