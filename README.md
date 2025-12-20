@@ -75,7 +75,7 @@ cp .env.example .env
    - Replace `YOUR_ANON_PUBLIC_KEY_HERE` with the key you copied
    - Example:
      ```dotenv
-     VITE_SUPABASE_PUBLISHABLE_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+     VITE_SUPABASE_PUBLISHABLE_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndoZGxqdGJ0cWlzb3N6YnJ6ZHdxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MDAwMDAwMDAsImV4cCI6MjAwMDAwMDAwMH0.your_signature_here"
      ```
 
 4. **Verify the Configuration**
@@ -89,8 +89,6 @@ If you see "wrong api key" errors:
 - ✅ Check that the key is from the project `whdljtbtqisoszbrzdwq`
 - ✅ Ensure there are no extra spaces or quotes in the `.env` file
 - ✅ Restart your development server after updating `.env`
-
-```
 
 ### Running Locally
 
