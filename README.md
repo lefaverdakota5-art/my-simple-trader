@@ -73,14 +73,15 @@ cp .env.example .env
 3. **Update Your `.env` File**
    - Open `.env` in your project root
    - Replace `YOUR_ANON_PUBLIC_KEY_HERE` with the key you copied
-   - Example:
+   - Example (your actual key will be different):
      ```dotenv
-     VITE_SUPABASE_PUBLISHABLE_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndoZGxqdGJ0cWlzb3N6YnJ6ZHdxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MDAwMDAwMDAsImV4cCI6MjAwMDAwMDAwMH0.your_signature_here"
+     VITE_SUPABASE_PUBLISHABLE_KEY="eyJ...your_actual_anon_key_from_dashboard..."
      ```
 
 4. **Verify the Configuration**
-   - Make sure the `ref` field in your JWT matches the project ID `whdljtbtqisoszbrzdwq`
-   - You can decode your JWT at https://jwt.io to verify
+   - To verify your key is correct, paste it at https://jwt.io
+   - In the decoded payload, check that `"ref":"whdljtbtqisoszbrzdwq"` matches your project ID
+   - If the `ref` field shows a different project ID, you copied the wrong key
 
 #### Troubleshooting Authentication Issues
 
