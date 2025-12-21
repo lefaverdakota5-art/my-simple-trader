@@ -83,14 +83,7 @@ export default function Withdraw() {
 
   // Deposit money from Chime to trading account
   const handleChimeDeposit = async () => {
-    if (!user || !botApiBase) {
-      toast({
-        title: 'Backend Not Configured',
-        description: 'Please configure the bot backend URL in Settings.',
-        variant: 'destructive',
-      });
-      return;
-    }
+    if (!user) return;
     
     const numAmount = parseFloat(amount);
     if (isNaN(numAmount) || numAmount <= 0) {
@@ -115,42 +108,31 @@ export default function Withdraw() {
     setSubmitting(true);
 
     try {
-      const token = await getAccessToken();
-      if (!token) {
-        toast({
-          title: 'Error',
-          description: 'Authentication failed',
-          variant: 'destructive',
+      // Create a deposit record in the database
+      const { error } = await supabase
+        .from('withdrawal_requests')
+        .insert({
+          user_id: user.id,
+          amount: numAmount,
+          status: 'pending',
+          withdraw_type: 'deposit',
+          bank_name: chimeDetails.chime_account_name || 'Chime',
         });
-        setSubmitting(false);
-        return;
-      }
 
-      const response = await fetch(`${botApiBase}/deposit/from_chime`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ amount: numAmount }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
+      if (error) {
         toast({
           title: 'Error',
-          description: data.error || 'Deposit failed',
+          description: error.message,
           variant: 'destructive',
         });
       } else {
         toast({
-          title: '✅ Deposit Successful!',
-          description: `$${numAmount.toFixed(2)} deposited from Chime to trading account`,
+          title: '✅ Deposit Request Submitted!',
+          description: `$${numAmount.toFixed(2)} deposit from Chime is being processed`,
         });
         setAmount('');
         
-        // Refresh withdrawals list
+        // Refresh list
         const { data: withdrawalData } = await supabase
           .from('withdrawal_requests')
           .select('*')
@@ -163,7 +145,7 @@ export default function Withdraw() {
     } catch (error) {
       toast({
         title: 'Error',
-        description: 'Failed to process deposit',
+        description: 'Failed to process deposit request',
         variant: 'destructive',
       });
     }
