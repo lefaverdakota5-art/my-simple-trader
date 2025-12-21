@@ -11,19 +11,16 @@ import {
   setKrakenWithdrawKeyUsd,
 } from "@/lib/botApi";
 
-// Validation schema - Kraken for trading, Plaid for banking
+// Validation schema - Kraken for trading
 const apiKeysSchema = z.object({
   krakenKey: z.string().trim(),
   krakenSecret: z.string().trim(),
-  plaidClientId: z.string().trim(),
-  plaidSecret: z.string().trim(),
 }).refine(
   (data) => {
     const partialKraken = (data.krakenKey.length > 0) !== (data.krakenSecret.length > 0);
-    const partialPlaid = (data.plaidClientId.length > 0) !== (data.plaidSecret.length > 0);
-    return !partialKraken && !partialPlaid;
+    return !partialKraken;
   },
-  { message: "Please provide both key and secret for each integration, or leave both empty" }
+  { message: "Please provide both Kraken key and secret, or leave both empty" }
 );
 
 export default function Settings() {
@@ -34,9 +31,6 @@ export default function Settings() {
   const [krakenWithdrawAsset, setKrakenWithdrawAssetState] = useState("ZUSD");
   const [krakenKey, setKrakenKey] = useState("");
   const [krakenSecret, setKrakenSecret] = useState("");
-  const [plaidClientId, setPlaidClientId] = useState("");
-  const [plaidSecret, setPlaidSecret] = useState("");
-  const [plaidEnv, setPlaidEnv] = useState("production");
   const [takeProfitPercent, setTakeProfitPercent] = useState(10);
   const [stopLossPercent, setStopLossPercent] = useState(5);
   const [trailingStopPercent, setTrailingStopPercent] = useState(3);
@@ -52,8 +46,6 @@ export default function Settings() {
   const [submittingTpSl, setSubmittingTpSl] = useState(false);
   const [status, setStatus] = useState<{
     krakenOk?: boolean;
-    plaidOk?: boolean;
-    plaidEnv?: string;
     takeProfitPercent?: number;
     stopLossPercent?: number;
     trailingStopPercent?: number;
@@ -90,7 +82,6 @@ export default function Settings() {
         });
         if (!error && data?.success) {
           setStatus(data);
-          if (data.plaidEnv) setPlaidEnv(data.plaidEnv);
           if (data.takeProfitPercent != null) setTakeProfitPercent(data.takeProfitPercent);
           if (data.stopLossPercent != null) setStopLossPercent(data.stopLossPercent);
           if (data.trailingStopPercent != null) setTrailingStopPercent(data.trailingStopPercent);
@@ -138,6 +129,109 @@ export default function Settings() {
       <h1 className="big-text" style={{ marginBottom: "16px" }}>
         Settings
       </h1>
+
+      {/* Chime Direct - Primary Banking Method */}
+      <div style={{ 
+        marginBottom: "24px",
+        padding: "20px",
+        background: "linear-gradient(135deg, hsl(160, 84%, 39%, 0.15), hsl(160, 84%, 39%, 0.05))",
+        borderRadius: "12px",
+        border: "2px solid hsl(160, 84%, 39%, 0.4)"
+      }}>
+        <h2 className="medium-text" style={{ fontWeight: 600, marginBottom: "8px", color: "hsl(160, 84%, 39%)" }}>
+          💳 Chime Banking
+        </h2>
+        <p style={{ color: "hsl(var(--muted-foreground))", fontSize: "0.9rem", marginBottom: "16px" }}>
+          Connect your Chime account for easy deposits and withdrawals. No complex setup required!
+          {chimeConnected && <span style={{ color: "hsl(142, 76%, 36%)", marginLeft: "8px", fontWeight: 600 }}>✓ Connected</span>}
+        </p>
+        
+        <div style={{ marginBottom: "12px" }}>
+          <label style={{ display: "block", marginBottom: "4px", fontWeight: 500 }}>
+            Account Name
+          </label>
+          <input
+            className="plain-input"
+            value={chimeAccountName}
+            onChange={(e) => setChimeAccountName(e.target.value)}
+            placeholder="Chime Spending"
+          />
+        </div>
+        
+        <div style={{ display: "flex", gap: "12px", flexWrap: "wrap", marginBottom: "12px" }}>
+          <div style={{ flex: "1", minWidth: "140px" }}>
+            <label style={{ display: "block", marginBottom: "4px", fontWeight: 500 }}>
+              Routing Number
+            </label>
+            <input
+              className="plain-input"
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              maxLength={9}
+              value={chimeRoutingNumber}
+              onChange={(e) => setChimeRoutingNumber(e.target.value.replace(/\D/g, ""))}
+              placeholder="9 digits"
+            />
+          </div>
+          <div style={{ flex: "1", minWidth: "140px" }}>
+            <label style={{ display: "block", marginBottom: "4px", fontWeight: 500 }}>
+              Account Number
+            </label>
+            <input
+              className="plain-input"
+              type="password"
+              inputMode="numeric"
+              value={chimeAccountNumber}
+              onChange={(e) => setChimeAccountNumber(e.target.value.replace(/\D/g, ""))}
+              placeholder="Your account number"
+            />
+          </div>
+        </div>
+        
+        <button
+          className="plain-button"
+          disabled={savingChime || !chimeRoutingNumber || !chimeAccountNumber}
+          onClick={async () => {
+            if (chimeRoutingNumber.length !== 9) {
+              toast({ title: "Invalid Routing Number", description: "Routing number must be 9 digits", variant: "destructive" });
+              return;
+            }
+            if (chimeAccountNumber.length < 4) {
+              toast({ title: "Invalid Account Number", description: "Please enter a valid account number", variant: "destructive" });
+              return;
+            }
+            
+            setSavingChime(true);
+            try {
+              const { error } = await supabase
+                .from("user_exchange_keys")
+                .upsert({
+                  user_id: user!.id,
+                  chime_routing_number: chimeRoutingNumber,
+                  chime_account_number: chimeAccountNumber,
+                  chime_account_name: chimeAccountName || "Chime Spending",
+                }, { onConflict: "user_id" });
+              
+              if (error) {
+                toast({ title: "Failed", description: error.message, variant: "destructive" });
+              } else {
+                setChimeConnected(true);
+                toast({ title: "✅ Chime Connected!", description: "You can now deposit and withdraw from your Chime account." });
+              }
+            } finally {
+              setSavingChime(false);
+            }
+          }}
+          style={{ fontWeight: 600, background: "hsl(160, 84%, 39%)", color: "white", padding: "14px 24px" }}
+        >
+          {savingChime ? "Saving..." : chimeConnected ? "Update Chime Details" : "Connect Chime Account"}
+        </button>
+        
+        <p style={{ color: "hsl(var(--muted-foreground))", fontSize: "0.8rem", marginTop: "12px" }}>
+          🔒 Your bank details are encrypted and stored securely. Find your routing/account numbers in the Chime app under "Move Money" → "Set up direct deposit".
+        </p>
+      </div>
 
       {/* AI Council Info */}
       <div style={{ 
@@ -340,7 +434,7 @@ export default function Settings() {
 
       <div style={{ marginBottom: "24px" }}>
         <h2 className="medium-text" style={{ fontWeight: 600, marginBottom: "12px" }}>
-          Exchange & Banking Keys
+          Exchange Keys (Kraken)
         </h2>
         
         {/* Status indicators */}
@@ -359,14 +453,11 @@ export default function Settings() {
             <span style={{ color: status.krakenOk ? "hsl(142, 76%, 36%)" : "hsl(var(--muted-foreground))" }}>
               {status.krakenOk ? "✓" : "○"} Kraken (Trading)
             </span>
-            <span style={{ color: status.plaidOk ? "hsl(142, 76%, 36%)" : "hsl(var(--muted-foreground))" }}>
-              {status.plaidOk ? "✓" : "○"} Plaid (Banking)
-            </span>
           </div>
         )}
         
         <p style={{ color: "hsl(var(--muted-foreground))", fontSize: "0.9rem", marginBottom: "12px" }}>
-          Kraken keys are required for live trading. Plaid is optional for bank withdrawals.
+          Kraken keys are required for live crypto trading.
         </p>
 
         <div style={{ marginBottom: "12px" }}>
@@ -396,41 +487,6 @@ export default function Settings() {
           />
         </div>
 
-        <div style={{ marginBottom: "12px" }}>
-          <label style={{ display: "block", marginBottom: "4px", fontWeight: 500 }}>Plaid Client ID (optional)</label>
-          <input
-            className="plain-input"
-            type="text"
-            autoCapitalize="none"
-            autoCorrect="off"
-            spellCheck={false}
-            value={plaidClientId}
-            onChange={(e) => setPlaidClientId(e.target.value)}
-            placeholder="For bank withdrawals"
-          />
-        </div>
-        <div style={{ marginBottom: "12px" }}>
-          <label style={{ display: "block", marginBottom: "4px", fontWeight: 500 }}>Plaid Secret</label>
-          <input
-            className="plain-input"
-            type="password"
-            autoCapitalize="none"
-            autoCorrect="off"
-            spellCheck={false}
-            value={plaidSecret}
-            onChange={(e) => setPlaidSecret(e.target.value)}
-            placeholder="Plaid secret key"
-          />
-        </div>
-        <div style={{ marginBottom: "12px" }}>
-          <label style={{ display: "block", marginBottom: "4px", fontWeight: 500 }}>Plaid Environment</label>
-          <select className="plain-input" value={plaidEnv} onChange={(e) => setPlaidEnv(e.target.value)}>
-            <option value="production">production</option>
-            <option value="development">development</option>
-            <option value="sandbox">sandbox</option>
-          </select>
-        </div>
-
         {validationError && (
           <div style={{
             padding: "12px",
@@ -454,8 +510,6 @@ export default function Settings() {
             const validationResult = apiKeysSchema.safeParse({
               krakenKey,
               krakenSecret,
-              plaidClientId,
-              plaidSecret,
             });
             
             if (!validationResult.success) {
@@ -476,9 +530,6 @@ export default function Settings() {
                   action: "set_keys",
                   kraken_key: krakenKey.trim() || null,
                   kraken_secret: krakenSecret.trim() || null,
-                  plaid_client_id: plaidClientId.trim() || null,
-                  plaid_secret: plaidSecret.trim() || null,
-                  plaid_env: plaidEnv,
                 },
               });
               if (error) {
@@ -486,11 +537,9 @@ export default function Settings() {
               } else if (resp?.error) {
                 toast({ title: "Failed", description: String(resp.error), variant: "destructive" });
               } else {
-                toast({ title: "Saved", description: "Keys stored securely." });
+                toast({ title: "Saved", description: "Kraken keys stored securely." });
                 setKrakenKey("");
                 setKrakenSecret("");
-                setPlaidClientId("");
-                setPlaidSecret("");
                 // Refresh status
                 const { data: statusData } = await supabase.functions.invoke("bot-actions", {
                   body: { action: "status" },
@@ -503,111 +552,8 @@ export default function Settings() {
           }}
           style={{ fontWeight: 600 }}
         >
-          {submitting ? "Saving..." : "Save Keys"}
+          {submitting ? "Saving..." : "Save Kraken Keys"}
         </button>
-      </div>
-
-      {/* Chime Direct - Easy Bank Transfer */}
-      <div style={{ 
-        marginTop: "24px",
-        padding: "20px",
-        background: "linear-gradient(135deg, hsl(160, 84%, 39%, 0.1), hsl(160, 84%, 39%, 0.05))",
-        borderRadius: "12px",
-        border: "1px solid hsl(160, 84%, 39%, 0.3)"
-      }}>
-        <h2 className="medium-text" style={{ fontWeight: 600, marginBottom: "8px", color: "hsl(160, 84%, 39%)" }}>
-          💳 Chime Direct (Easy Withdrawals)
-        </h2>
-        <p style={{ color: "hsl(var(--muted-foreground))", fontSize: "0.9rem", marginBottom: "16px" }}>
-          Enter your Chime routing and account numbers for direct ACH withdrawals. No Plaid setup required!
-          {chimeConnected && <span style={{ color: "hsl(142, 76%, 36%)", marginLeft: "8px" }}>✓ Connected</span>}
-        </p>
-        
-        <div style={{ marginBottom: "12px" }}>
-          <label style={{ display: "block", marginBottom: "4px", fontWeight: 500 }}>
-            Account Name
-          </label>
-          <input
-            className="plain-input"
-            value={chimeAccountName}
-            onChange={(e) => setChimeAccountName(e.target.value)}
-            placeholder="Chime Spending"
-          />
-        </div>
-        
-        <div style={{ display: "flex", gap: "12px", flexWrap: "wrap", marginBottom: "12px" }}>
-          <div style={{ flex: "1", minWidth: "140px" }}>
-            <label style={{ display: "block", marginBottom: "4px", fontWeight: 500 }}>
-              Routing Number
-            </label>
-            <input
-              className="plain-input"
-              type="text"
-              inputMode="numeric"
-              pattern="[0-9]*"
-              maxLength={9}
-              value={chimeRoutingNumber}
-              onChange={(e) => setChimeRoutingNumber(e.target.value.replace(/\D/g, ""))}
-              placeholder="9 digits"
-            />
-          </div>
-          <div style={{ flex: "1", minWidth: "140px" }}>
-            <label style={{ display: "block", marginBottom: "4px", fontWeight: 500 }}>
-              Account Number
-            </label>
-            <input
-              className="plain-input"
-              type="password"
-              inputMode="numeric"
-              value={chimeAccountNumber}
-              onChange={(e) => setChimeAccountNumber(e.target.value.replace(/\D/g, ""))}
-              placeholder="Your account number"
-            />
-          </div>
-        </div>
-        
-        <button
-          className="plain-button"
-          disabled={savingChime || !chimeRoutingNumber || !chimeAccountNumber}
-          onClick={async () => {
-            if (chimeRoutingNumber.length !== 9) {
-              toast({ title: "Invalid Routing Number", description: "Routing number must be 9 digits", variant: "destructive" });
-              return;
-            }
-            if (chimeAccountNumber.length < 4) {
-              toast({ title: "Invalid Account Number", description: "Please enter a valid account number", variant: "destructive" });
-              return;
-            }
-            
-            setSavingChime(true);
-            try {
-              const { error } = await supabase
-                .from("user_exchange_keys")
-                .upsert({
-                  user_id: user!.id,
-                  chime_routing_number: chimeRoutingNumber,
-                  chime_account_number: chimeAccountNumber,
-                  chime_account_name: chimeAccountName || "Chime Spending",
-                }, { onConflict: "user_id" });
-              
-              if (error) {
-                toast({ title: "Failed", description: error.message, variant: "destructive" });
-              } else {
-                setChimeConnected(true);
-                toast({ title: "Chime Connected!", description: "You can now withdraw directly to your Chime account." });
-              }
-            } finally {
-              setSavingChime(false);
-            }
-          }}
-          style={{ fontWeight: 600, background: "hsl(160, 84%, 39%)", color: "white" }}
-        >
-          {savingChime ? "Saving..." : chimeConnected ? "Update Chime Details" : "Connect Chime Account"}
-        </button>
-        
-        <p style={{ color: "hsl(var(--muted-foreground))", fontSize: "0.8rem", marginTop: "12px" }}>
-          🔒 Your bank details are encrypted and stored securely. Find your routing/account numbers in the Chime app under "Move Money" → "Set up direct deposit".
-        </p>
       </div>
 
       <div style={{ marginTop: "24px" }}>

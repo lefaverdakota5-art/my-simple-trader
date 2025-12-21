@@ -12,19 +12,13 @@ interface ChimeDetails {
   chime_account_name: string | null;
 }
 
-interface PlaidBalance {
-  available: number | null;
-  current: number | null;
-  limit: number | null;
-}
-
-interface PlaidAccount {
-  account_id: string;
-  name: string;
-  mask: string;
-  type: string;
-  subtype: string;
-  balances: PlaidBalance;
+interface WithdrawalRequest {
+  id: string;
+  amount: number;
+  status: string;
+  created_at: string;
+  withdraw_type?: string;
+  bank_name?: string;
 }
 
 export default function Withdraw() {
@@ -35,61 +29,18 @@ export default function Withdraw() {
   
   const [amount, setAmount] = useState('');
   const [mode, setMode] = useState<'deposit' | 'withdraw'>('deposit');
-  const [withdrawType, setWithdrawType] = useState('chime_direct');
   const [submitting, setSubmitting] = useState(false);
   const [withdrawals, setWithdrawals] = useState<WithdrawalRequest[]>([]);
   const [krakenKey, setKrakenKey] = useState("");
   const [krakenAsset, setKrakenAsset] = useState("ZUSD");
   const [chimeDetails, setChimeDetails] = useState<ChimeDetails | null>(null);
   const [loadingChime, setLoadingChime] = useState(true);
-  const [chimeBalance, setChimeBalance] = useState<number | null>(null);
-  const [plaidAccounts, setPlaidAccounts] = useState<PlaidAccount[]>([]);
-
-  interface WithdrawalRequest {
-    id: string;
-    amount: number;
-    status: string;
-    created_at: string;
-    withdraw_type?: string;
-    bank_name?: string;
-  }
 
   useEffect(() => {
     if (!authLoading && !user) {
       navigate('/');
     }
   }, [user, authLoading, navigate]);
-
-  // Fetch Plaid/Chime balance
-  useEffect(() => {
-    if (!user || !botApiBase) return;
-
-    const fetchChimeBalance = async () => {
-      try {
-        const token = await getSupabaseAccessToken();
-        if (!token) return;
-
-        const response = await fetch(`${botApiBase}/plaid/accounts`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          if (data.connected && data.accounts && data.accounts.length > 0) {
-            setPlaidAccounts(data.accounts);
-            // Use the first account's balance
-            const primaryAccount = data.accounts[0];
-            const balance = primaryAccount.balances?.available ?? primaryAccount.balances?.current ?? null;
-            setChimeBalance(balance);
-          }
-        }
-      } catch (error) {
-        console.error('Failed to fetch Chime balance:', error);
-      }
-    };
-
-    fetchChimeBalance();
-  }, [user, botApiBase]);
 
   // Fetch existing withdrawal requests and Chime details
   useEffect(() => {
@@ -132,7 +83,14 @@ export default function Withdraw() {
 
   // Deposit money from Chime to trading account
   const handleChimeDeposit = async () => {
-    if (!user || !botApiBase) return;
+    if (!user || !botApiBase) {
+      toast({
+        title: 'Backend Not Configured',
+        description: 'Please configure the bot backend URL in Settings.',
+        variant: 'destructive',
+      });
+      return;
+    }
     
     const numAmount = parseFloat(amount);
     if (isNaN(numAmount) || numAmount <= 0) {
@@ -151,25 +109,6 @@ export default function Withdraw() {
         variant: 'destructive',
       });
       navigate('/settings');
-      return;
-    }
-
-    // Check against Chime balance if available
-    if (chimeBalance === null) {
-      toast({
-        title: 'Error',
-        description: 'Chime balance is still loading. Please wait a moment and try again.',
-        variant: 'destructive',
-      });
-      return;
-    }
-    
-    if (numAmount > chimeBalance) {
-      toast({
-        title: 'Error',
-        description: `Insufficient Chime balance. Available: $${chimeBalance.toFixed(2)}`,
-        variant: 'destructive',
-      });
       return;
     }
 
@@ -211,7 +150,7 @@ export default function Withdraw() {
         });
         setAmount('');
         
-        // Refresh withdrawals list (the trader_state will update via realtime subscription)
+        // Refresh withdrawals list
         const { data: withdrawalData } = await supabase
           .from('withdrawal_requests')
           .select('*')
@@ -373,67 +312,6 @@ export default function Withdraw() {
     }
   };
 
-  const handleWithdraw = async () => {
-    if (!user) return;
-    
-    const numAmount = parseFloat(amount);
-    if (isNaN(numAmount) || numAmount <= 0) {
-      toast({
-        title: 'Error',
-        description: 'Please enter a valid amount',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    if (numAmount > (state?.balance || 0)) {
-      toast({
-        title: 'Error',
-        description: 'Insufficient balance',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    setSubmitting(true);
-
-    const { error } = await supabase
-      .from('withdrawal_requests')
-      .insert({
-        user_id: user.id,
-        amount: numAmount,
-        status: 'pending',
-        withdraw_type: withdrawType,
-        bank_name: withdrawType === 'chime' ? 'Chime' : '',
-      });
-
-    if (error) {
-      toast({
-        title: 'Error',
-        description: error.message,
-        variant: 'destructive',
-      });
-    } else {
-      toast({
-        title: 'Success',
-        description: 'Withdrawal request submitted',
-      });
-      setAmount('');
-      
-      // Refresh withdrawals list
-      const { data } = await supabase
-        .from('withdrawal_requests')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false })
-        .limit(10);
-      
-      if (data) setWithdrawals(data);
-    }
-
-    setSubmitting(false);
-  };
-
   if (authLoading || stateLoading) {
     return (
       <div className="app-container">
@@ -483,15 +361,15 @@ export default function Withdraw() {
         </div>
         <div style={{ 
           padding: '16px', 
-          background: 'hsl(var(--muted))', 
+          background: 'linear-gradient(135deg, hsl(160, 84%, 39%, 0.1), hsl(160, 84%, 39%, 0.05))', 
           borderRadius: '8px',
-          border: '1px solid hsl(var(--border))'
+          border: '1px solid hsl(160, 84%, 39%, 0.3)'
         }}>
-          <p style={{ fontSize: '0.875rem', color: 'hsl(var(--muted-foreground))', marginBottom: '4px' }}>
-            Chime Balance
+          <p style={{ fontSize: '0.875rem', color: 'hsl(160, 84%, 39%)', marginBottom: '4px' }}>
+            💳 Chime Account
           </p>
           <p style={{ fontSize: '1.5rem', fontWeight: '600' }}>
-            {chimeBalance !== null ? formatMoney(chimeBalance) : '—'}
+            {chimeDetails?.chime_account_name || 'Not Connected'}
           </p>
         </div>
       </div>
@@ -577,9 +455,7 @@ export default function Withdraw() {
                 style={{ fontSize: '1.2rem', padding: '12px' }}
               />
               <p style={{ fontSize: '0.75rem', color: 'hsl(var(--muted-foreground))', marginTop: '4px' }}>
-                {mode === 'deposit' 
-                  ? `Available in Chime: ${chimeBalance !== null ? formatMoney(chimeBalance) : 'Loading...'}`
-                  : `Available in Trading: ${formatMoney(state?.balance || 0)}`}
+                {mode === 'withdraw' && `Available in Trading: ${formatMoney(state?.balance || 0)}`}
               </p>
             </div>
             
@@ -649,18 +525,9 @@ export default function Withdraw() {
             className="plain-button"
             onClick={handleWithdrawViaKraken}
             disabled={submitting}
-            style={{ marginBottom: '8px', fontWeight: '600', width: '100%' }}
-          >
-            {submitting ? 'Please wait...' : 'Withdraw USD via Kraken'}
-          </button>
-
-          <button
-            className="plain-button"
-            onClick={handleWithdraw}
-            disabled={submitting}
             style={{ fontWeight: '600', width: '100%' }}
           >
-            {submitting ? 'Processing...' : 'Submit Withdrawal Request'}
+            {submitting ? 'Please wait...' : 'Withdraw USD via Kraken'}
           </button>
         </div>
       </details>
@@ -697,7 +564,7 @@ export default function Withdraw() {
                       {isDeposit ? 'Deposit' : 'Withdrawal'}: {formatMoney(w.amount)}
                     </p>
                     <p style={{ color: 'hsl(var(--muted-foreground))', fontSize: '0.875rem' }}>
-                      {w.bank_name || 'Bank'} • {w.status} • {new Date(w.created_at).toLocaleDateString()}
+                      {w.bank_name || 'Chime'} • {w.status} • {new Date(w.created_at).toLocaleDateString()}
                     </p>
                   </div>
                   <p style={{ 

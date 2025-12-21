@@ -8,7 +8,6 @@ import Dashboard from "./pages/Dashboard";
 import Council from "./pages/Council";
 import Withdraw from "./pages/Withdraw";
 import Install from "./pages/Install";
-import Bank from "./pages/Bank";
 import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
 
@@ -26,7 +25,6 @@ const App = () => (
           <Route path="/council" element={<Council />} />
           <Route path="/withdraw" element={<Withdraw />} />
           <Route path="/install" element={<Install />} />
-          <Route path="/bank" element={<Bank />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
