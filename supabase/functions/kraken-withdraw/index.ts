@@ -291,6 +291,85 @@ serve(async (req) => {
       return jsonResponse({ success: true, withdrawals: result.result });
     }
 
+    // Test API key permissions
+    if (action === "test_permissions") {
+      console.log("Testing Kraken API key permissions...");
+      
+      const permissions = {
+        balance: false,
+        withdraw_info: false,
+        withdraw_addresses: false,
+        withdraw_methods: false,
+      };
+      const errors: string[] = [];
+      
+      // Test balance (requires "Query Funds" permission)
+      const balanceResult = await krakenRequest("/0/private/Balance", krakenKey, krakenSecret);
+      if (balanceResult.error && balanceResult.error.length > 0) {
+        errors.push(`Balance: ${balanceResult.error.join(", ")}`);
+      } else {
+        permissions.balance = true;
+      }
+      
+      // Test withdraw info (requires "Withdraw Funds" permission)
+      const withdrawInfoResult = await krakenRequest("/0/private/WithdrawInfo", krakenKey, krakenSecret, {
+        asset: "USD",
+        amount: "1",
+      });
+      if (withdrawInfoResult.error && withdrawInfoResult.error.length > 0) {
+        const errMsg = withdrawInfoResult.error.join(", ");
+        // "EFunding:Unknown withdraw key" means permission is OK, just no key set
+        if (errMsg.includes("Unknown withdraw key") || errMsg.includes("Invalid key")) {
+          permissions.withdraw_info = true; // Permission granted, just no address
+        } else {
+          errors.push(`Withdraw Info: ${errMsg}`);
+        }
+      } else {
+        permissions.withdraw_info = true;
+      }
+      
+      // Test withdraw addresses (requires "Withdraw Funds" permission)
+      const addressesResult = await krakenRequest("/0/private/WithdrawAddresses", krakenKey, krakenSecret, {
+        asset: "USD",
+      });
+      if (addressesResult.error && addressesResult.error.length > 0) {
+        errors.push(`Withdraw Addresses: ${addressesResult.error.join(", ")}`);
+      } else {
+        permissions.withdraw_addresses = true;
+      }
+      
+      // Test withdraw methods (requires "Withdraw Funds" permission)
+      const methodsResult = await krakenRequest("/0/private/WithdrawMethods", krakenKey, krakenSecret, {
+        asset: "USD",
+      });
+      if (methodsResult.error && methodsResult.error.length > 0) {
+        errors.push(`Withdraw Methods: ${methodsResult.error.join(", ")}`);
+      } else {
+        permissions.withdraw_methods = true;
+      }
+      
+      const hasWithdrawPermission = permissions.withdraw_info || permissions.withdraw_addresses || permissions.withdraw_methods;
+      
+      // Get saved addresses for display
+      let savedAddresses: unknown[] = [];
+      if (permissions.withdraw_addresses && addressesResult.result) {
+        savedAddresses = addressesResult.result as unknown[];
+      }
+      
+      console.log("Permission test results:", { permissions, errors, savedAddresses });
+      
+      return jsonResponse({
+        success: true,
+        permissions,
+        hasWithdrawPermission,
+        savedAddresses,
+        errors: errors.length > 0 ? errors : undefined,
+        message: hasWithdrawPermission 
+          ? "Your API key has withdrawal permissions enabled." 
+          : "Your API key does NOT have withdrawal permissions. Please create a new API key with 'Withdraw Funds' permission enabled."
+      });
+    }
+
     return jsonResponse({ error: "Unknown action" }, 400);
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Unknown error";

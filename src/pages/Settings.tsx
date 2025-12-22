@@ -50,6 +50,13 @@ export default function Settings() {
   const [chimeConnected, setChimeConnected] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submittingTpSl, setSubmittingTpSl] = useState(false);
+  const [testingPermissions, setTestingPermissions] = useState(false);
+  const [permissionResult, setPermissionResult] = useState<{
+    hasWithdrawPermission?: boolean;
+    savedAddresses?: { address?: string; key?: string }[];
+    message?: string;
+    errors?: string[];
+  } | null>(null);
   const [status, setStatus] = useState<{
     krakenOk?: boolean;
     alpacaOk?: boolean;
@@ -678,33 +685,121 @@ export default function Settings() {
             placeholder="USD"
           />
         </div>
-        <button
-          className="plain-button"
-          onClick={async () => {
-            if (!user) return;
-            try {
-              const { error } = await supabase
-                .from("user_exchange_keys")
-                .upsert({
-                  user_id: user.id,
-                  kraken_withdraw_key: krakenWithdrawKey.trim() || null,
-                }, { onConflict: "user_id" });
-              
-              if (error) {
-                toast({ title: "Failed", description: error.message, variant: "destructive" });
-              } else {
-                // Also save asset to localStorage
-                setKrakenWithdrawAsset(krakenWithdrawAsset);
-                toast({ title: "✅ Saved", description: "Kraken withdrawal settings saved." });
+        <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
+          <button
+            className="plain-button"
+            onClick={async () => {
+              if (!user) return;
+              try {
+                const { error } = await supabase
+                  .from("user_exchange_keys")
+                  .upsert({
+                    user_id: user.id,
+                    kraken_withdraw_key: krakenWithdrawKey.trim() || null,
+                  }, { onConflict: "user_id" });
+                
+                if (error) {
+                  toast({ title: "Failed", description: error.message, variant: "destructive" });
+                } else {
+                  // Also save asset to localStorage
+                  setKrakenWithdrawAsset(krakenWithdrawAsset);
+                  toast({ title: "✅ Saved", description: "Kraken withdrawal settings saved." });
+                }
+              } catch (e) {
+                toast({ title: "Error", description: "Failed to save", variant: "destructive" });
               }
-            } catch (e) {
-              toast({ title: "Error", description: "Failed to save", variant: "destructive" });
-            }
-          }}
-          style={{ fontWeight: 600 }}
-        >
-          Save Withdrawal Settings
-        </button>
+            }}
+            style={{ fontWeight: 600 }}
+          >
+            Save Withdrawal Settings
+          </button>
+          
+          <button
+            className="plain-button"
+            disabled={testingPermissions}
+            onClick={async () => {
+              setTestingPermissions(true);
+              setPermissionResult(null);
+              try {
+                const { data, error } = await supabase.functions.invoke("kraken-withdraw", {
+                  body: { action: "test_permissions" },
+                });
+                if (error) {
+                  toast({ title: "Error", description: error.message, variant: "destructive" });
+                } else if (data?.error) {
+                  toast({ title: "Error", description: data.error, variant: "destructive" });
+                } else {
+                  setPermissionResult(data);
+                  if (data.hasWithdrawPermission) {
+                    toast({ title: "✅ Permissions OK", description: "Your API key has withdrawal permissions." });
+                  } else {
+                    toast({ title: "⚠️ Missing Permissions", description: "Withdrawal permission not enabled", variant: "destructive" });
+                  }
+                }
+              } catch (e) {
+                toast({ title: "Error", description: "Failed to test permissions", variant: "destructive" });
+              } finally {
+                setTestingPermissions(false);
+              }
+            }}
+            style={{ fontWeight: 600, background: "hsl(var(--muted))", color: "hsl(var(--foreground))" }}
+          >
+            {testingPermissions ? "Testing..." : "Test API Permissions"}
+          </button>
+        </div>
+        
+        {permissionResult && (
+          <div style={{
+            marginTop: "16px",
+            padding: "16px",
+            borderRadius: "8px",
+            background: permissionResult.hasWithdrawPermission 
+              ? "hsl(142, 76%, 36%, 0.1)" 
+              : "hsl(0, 84%, 60%, 0.1)",
+            border: `1px solid ${permissionResult.hasWithdrawPermission 
+              ? "hsl(142, 76%, 36%)" 
+              : "hsl(0, 84%, 60%)"}`,
+          }}>
+            <p style={{ 
+              fontWeight: 600, 
+              marginBottom: "8px",
+              color: permissionResult.hasWithdrawPermission 
+                ? "hsl(142, 76%, 36%)" 
+                : "hsl(0, 84%, 60%)"
+            }}>
+              {permissionResult.hasWithdrawPermission ? "✅ Withdrawal Enabled" : "❌ Withdrawal Not Enabled"}
+            </p>
+            <p style={{ fontSize: "0.9rem", color: "hsl(var(--muted-foreground))", marginBottom: "8px" }}>
+              {permissionResult.message}
+            </p>
+            
+            {permissionResult.savedAddresses && permissionResult.savedAddresses.length > 0 && (
+              <div style={{ marginTop: "12px" }}>
+                <p style={{ fontWeight: 500, marginBottom: "4px" }}>Your saved withdrawal addresses:</p>
+                {permissionResult.savedAddresses.map((addr, i) => (
+                  <p key={i} style={{ fontSize: "0.85rem", color: "hsl(var(--foreground))" }}>
+                    • <strong>{addr.key || "Unknown"}</strong>
+                  </p>
+                ))}
+              </div>
+            )}
+            
+            {permissionResult.savedAddresses?.length === 0 && permissionResult.hasWithdrawPermission && (
+              <p style={{ fontSize: "0.85rem", color: "hsl(var(--warning))", marginTop: "8px" }}>
+                ⚠️ No bank accounts saved in Kraken. Go to Kraken → Portfolio → Withdraw → USD to add your Chime bank.
+              </p>
+            )}
+            
+            {permissionResult.errors && permissionResult.errors.length > 0 && (
+              <div style={{ marginTop: "8px", fontSize: "0.8rem", color: "hsl(var(--muted-foreground))" }}>
+                <p style={{ fontWeight: 500 }}>Details:</p>
+                {permissionResult.errors.map((err, i) => (
+                  <p key={i}>• {err}</p>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* App Version */}
