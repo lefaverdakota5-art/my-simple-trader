@@ -1,15 +1,24 @@
-# AI Trader - Personal Trading Bot
+# AI Trader - Personal Trading Bot (v1.3.0)
 
-An AI-powered trading application that combines stock and crypto trading with intelligent decision-making through an OpenAI-powered council of AI agents.
+An AI-powered trading application that uses Kraken for cryptocurrency trading with intelligent decision-making through an OpenAI-powered council of AI agents.
+
+## ✨ Version 1.3.0 - New Features
+
+- ✅ **Functional Deposit Flow** - Deposit money from Chime directly into your trading account
+- ✅ **Kraken-Only Trading** - Focused cryptocurrency trading via Kraken API
+- ✅ **Real Balance Tracking** - Deposits update your balance, trades deduct from it
+- ✅ **Enhanced Logging** - Complete visibility into deposits and trades
+- ✅ **Comprehensive Testing** - Step-by-step guide for verifying real trades
 
 ## Features
 
 - 📱 **Mobile-First Android App** - Built with Capacitor for Samsung Galaxy S20 and other Android devices
-- 🤖 **OpenAI Swarm Council** - 5 specialized AI agents vote on trading decisions
-- 💰 **Multi-Exchange Support** - Trade stocks (Alpaca) and crypto (Kraken)
-- 🏦 **Bank Integration** - Connect your Chime account via Plaid for seamless transfers
+- 🤖 **OpenAI Swarm Council** - 5 specialized AI agents vote on trading decisions (4/5 required)
+- 💰 **Kraken Crypto Trading** - Trade Bitcoin, Ethereum, and other cryptocurrencies
+- 🏦 **Bank Integration** - Connect your Chime account for deposits and withdrawals
 - ⚙️ **Dynamic Configuration** - Update API keys directly in the app settings
 - 📊 **Real-Time Dashboard** - Monitor your portfolio, trades, and AI council decisions
+- 💵 **Balance Management** - Deposit funds, track spending, automatic overdraft protection
 
 ## Technologies
 
@@ -25,7 +34,6 @@ An AI-powered trading application that combines stock and crypto trading with in
 - Edge Functions (Deno)
 
 **Integrations:**
-- Alpaca API (Stock Trading)
 - Kraken API (Crypto Trading)
 - Plaid API (Bank Linking)
 - OpenAI API (AI Council)
