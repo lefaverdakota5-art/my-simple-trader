@@ -95,10 +95,10 @@ export default function Settings() {
           if (data.maxPositionPercent != null) setMaxPositionPercent(data.maxPositionPercent);
         }
         
-        // Load Chime details directly from database
+        // Load Chime details and Kraken withdrawal key from database
         const { data: keysData } = await supabase
           .from("user_exchange_keys")
-          .select("chime_routing_number, chime_account_number, chime_account_name")
+          .select("chime_routing_number, chime_account_number, chime_account_name, kraken_withdraw_key")
           .eq("user_id", user.id)
           .maybeSingle();
         
@@ -112,6 +112,9 @@ export default function Settings() {
           }
           if (keysData.chime_account_name) {
             setChimeAccountName(keysData.chime_account_name);
+          }
+          if (keysData.kraken_withdraw_key) {
+            setKrakenWithdrawKey(keysData.kraken_withdraw_key);
           }
         }
       } catch (e) {
@@ -642,44 +645,66 @@ export default function Settings() {
 
       <div style={{ marginTop: "24px" }}>
         <h2 className="medium-text" style={{ fontWeight: 600, marginBottom: "12px" }}>
-          Kraken Withdrawal (optional)
+          Kraken Withdrawal Setup
         </h2>
+        <p style={{ color: "hsl(var(--muted-foreground))", fontSize: "0.9rem", marginBottom: "16px" }}>
+          To withdraw USD from Kraken to your bank:
+          <br />1. Go to Kraken → Funding → Withdraw → USD
+          <br />2. Add your Chime bank as a withdrawal address
+          <br />3. Copy the "key name" you created and paste it below
+        </p>
         <div style={{ marginBottom: "12px" }}>
           <label style={{ display: "block", marginBottom: "4px", fontWeight: 500 }}>
-            Withdraw Asset (default: ZUSD)
-          </label>
-          <input
-            className="plain-input"
-            value={krakenWithdrawAsset}
-            onChange={(e) => setKrakenWithdrawAssetState(e.target.value)}
-            placeholder="ZUSD"
-          />
-        </div>
-        <div style={{ marginBottom: "12px" }}>
-          <label style={{ display: "block", marginBottom: "4px", fontWeight: 500 }}>
-            Kraken Withdraw Key
+            Kraken Withdrawal Key Name
           </label>
           <input
             className="plain-input"
             value={krakenWithdrawKey}
             onChange={(e) => setKrakenWithdrawKey(e.target.value)}
-            placeholder="Your Kraken withdrawal key"
+            placeholder="e.g., Chime_Bank or My_Chime"
+          />
+          <p style={{ color: "hsl(var(--muted-foreground))", fontSize: "0.8rem", marginTop: "4px" }}>
+            This is the name you gave your bank when adding it in Kraken
+          </p>
+        </div>
+        <div style={{ marginBottom: "12px" }}>
+          <label style={{ display: "block", marginBottom: "4px", fontWeight: 500 }}>
+            Withdraw Asset (default: USD)
+          </label>
+          <input
+            className="plain-input"
+            value={krakenWithdrawAsset}
+            onChange={(e) => setKrakenWithdrawAssetState(e.target.value)}
+            placeholder="USD"
           />
         </div>
         <button
           className="plain-button"
-          onClick={() => {
-            setKrakenWithdrawKeyUsd(krakenWithdrawKey);
-            setKrakenWithdrawAsset(krakenWithdrawAsset);
-            toast({ title: "Saved", description: "Withdrawal settings saved locally." });
+          onClick={async () => {
+            if (!user) return;
+            try {
+              const { error } = await supabase
+                .from("user_exchange_keys")
+                .upsert({
+                  user_id: user.id,
+                  kraken_withdraw_key: krakenWithdrawKey.trim() || null,
+                }, { onConflict: "user_id" });
+              
+              if (error) {
+                toast({ title: "Failed", description: error.message, variant: "destructive" });
+              } else {
+                // Also save asset to localStorage
+                setKrakenWithdrawAsset(krakenWithdrawAsset);
+                toast({ title: "✅ Saved", description: "Kraken withdrawal settings saved." });
+              }
+            } catch (e) {
+              toast({ title: "Error", description: "Failed to save", variant: "destructive" });
+            }
           }}
           style={{ fontWeight: 600 }}
         >
           Save Withdrawal Settings
         </button>
-        <p style={{ color: "hsl(var(--muted-foreground))", fontSize: "0.85rem", marginTop: "8px" }}>
-          Stored on your device. Requires KRAKEN_ENABLE_WITHDRAWALS=true on backend.
-        </p>
       </div>
 
       {/* App Version */}

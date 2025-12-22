@@ -4,7 +4,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useTraderState } from '@/hooks/useTraderState';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/hooks/use-toast';
-import { getBotApiBaseUrl, getKrakenWithdrawAsset, getKrakenWithdrawKeyUsd, getSupabaseAccessToken, setKrakenWithdrawKeyUsd } from "@/lib/botApi";
+import { getBotApiBaseUrl, getKrakenWithdrawAsset, getSupabaseAccessToken } from "@/lib/botApi";
 
 interface ChimeDetails {
   chime_routing_number: string | null;
@@ -59,16 +59,19 @@ export default function Withdraw() {
       
       if (withdrawalData) setWithdrawals(withdrawalData);
       
-      // Fetch Chime details
+      // Fetch Chime details and Kraken withdrawal key
       setLoadingChime(true);
       const { data: keysData } = await supabase
         .from('user_exchange_keys')
-        .select('chime_routing_number, chime_account_number, chime_account_name')
+        .select('chime_routing_number, chime_account_number, chime_account_name, kraken_withdraw_key')
         .eq('user_id', user.id)
         .maybeSingle();
       
       if (keysData) {
         setChimeDetails(keysData);
+        if (keysData.kraken_withdraw_key) {
+          setKrakenWithdrawKey(keysData.kraken_withdraw_key);
+        }
       }
       setLoadingChime(false);
     };
@@ -77,7 +80,6 @@ export default function Withdraw() {
   }, [user]);
 
   useEffect(() => {
-    setKrakenWithdrawKey(getKrakenWithdrawKeyUsd());
     setKrakenAsset(getKrakenWithdrawAsset());
   }, []);
 
