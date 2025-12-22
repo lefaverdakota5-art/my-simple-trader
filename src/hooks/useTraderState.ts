@@ -36,25 +36,31 @@ export function useTraderState(userId: string | null, options: UseTraderStateOpt
   const [loadingKraken, setLoadingKraken] = useState(false);
   const { playNotificationSound } = useNotificationSound();
 
-  // Fetch real Kraken balance with timeout
+  // Fetch real Kraken balance with timeout and guard
   const fetchKrakenBalance = useCallback(async () => {
-    if (!userId) return;
+    if (!userId || loadingKraken) return; // Prevent concurrent requests
     setLoadingKraken(true);
     
     // Add timeout to prevent stuck loading state
     const timeout = setTimeout(() => {
+      console.log('Kraken balance fetch timed out');
       setLoadingKraken(false);
-    }, 10000); // 10 second timeout
+    }, 8000); // 8 second timeout
     
     try {
       const { data, error } = await supabase.functions.invoke('kraken-withdraw', {
         body: { action: 'get_balance' }
       });
       clearTimeout(timeout);
-      if (!error && data?.success) {
+      
+      if (error) {
+        console.error('Kraken balance error:', error);
+      } else if (data?.success) {
         setKrakenBalance(data.balance);
         // Update the state balance to match Kraken
         setState(prev => prev ? { ...prev, balance: data.balance } : prev);
+      } else if (data?.error) {
+        console.error('Kraken API error:', data.error);
       }
     } catch (e) {
       console.error('Failed to fetch Kraken balance:', e);
@@ -62,7 +68,7 @@ export function useTraderState(userId: string | null, options: UseTraderStateOpt
     } finally {
       setLoadingKraken(false);
     }
-  }, [userId]);
+  }, [userId, loadingKraken]);
 
   useEffect(() => {
     if (!userId) {
