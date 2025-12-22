@@ -35,15 +35,16 @@ export function useTraderState(userId: string | null, options: UseTraderStateOpt
   const [krakenBalance, setKrakenBalance] = useState<number | null>(null);
   const [loadingKraken, setLoadingKraken] = useState(false);
   const [lastFetchTime, setLastFetchTime] = useState<number>(0);
+  const [hasFetchedOnce, setHasFetchedOnce] = useState(false);
   const { playNotificationSound } = useNotificationSound();
 
   // Fetch real Kraken balance with rate limiting
   const fetchKrakenBalance = useCallback(async (force = false) => {
     if (!userId) return;
     
-    // Rate limit: don't fetch more than once per 15 seconds unless forced
+    // Rate limit: don't fetch more than once per 20 seconds unless forced
     const now = Date.now();
-    if (!force && now - lastFetchTime < 15000) {
+    if (!force && hasFetchedOnce && now - lastFetchTime < 20000) {
       console.log('Skipping Kraken fetch - rate limited');
       return;
     }
@@ -56,43 +57,63 @@ export function useTraderState(userId: string | null, options: UseTraderStateOpt
     const timeout = setTimeout(() => {
       console.log('Kraken balance fetch timed out');
       setLoadingKraken(false);
-    }, 10000);
+    }, 12000);
     
     try {
+      console.log('Fetching Kraken balance...');
       const { data, error } = await supabase.functions.invoke('kraken-withdraw', {
         body: { action: 'get_balance' }
       });
       clearTimeout(timeout);
+      setHasFetchedOnce(true);
+      
+      console.log('Kraken response:', data, error);
       
       if (error) {
         console.error('Kraken balance error:', error);
-        // On any error, try to get balance from state (cached in DB)
-        if (state?.balance !== undefined && state.balance > 0) {
-          setKrakenBalance(state.balance);
-          console.log('Using state balance after error:', state.balance);
+        // On error, immediately show cached balance from DB
+        const { data: cached } = await supabase
+          .from('trader_state')
+          .select('balance')
+          .eq('user_id', userId)
+          .maybeSingle();
+        if (cached?.balance !== undefined) {
+          setKrakenBalance(cached.balance);
+          console.log('Using DB cached balance:', cached.balance);
         }
       } else if (data?.success) {
-        setKrakenBalance(data.balance);
-        setState(prev => prev ? { ...prev, balance: data.balance } : prev);
-        console.log('Kraken balance updated:', data.balance, data.cached ? '(cached)' : '(fresh)');
+        const bal = data.balance ?? 0;
+        setKrakenBalance(bal);
+        setState(prev => prev ? { ...prev, balance: bal } : prev);
+        console.log('Kraken balance set:', bal, data.cached ? '(cached)' : '(fresh)');
       } else if (data?.error) {
         console.error('Kraken API error:', data.error);
-        // Still try to use cached balance
-        if (state?.balance !== undefined) {
-          setKrakenBalance(state.balance);
+        // Fallback to DB
+        const { data: cached } = await supabase
+          .from('trader_state')
+          .select('balance')
+          .eq('user_id', userId)
+          .maybeSingle();
+        if (cached?.balance !== undefined) {
+          setKrakenBalance(cached.balance);
         }
       }
     } catch (e) {
       console.error('Failed to fetch Kraken balance:', e);
       clearTimeout(timeout);
-      // Use cached balance on error
-      if (state?.balance !== undefined && state.balance > 0) {
-        setKrakenBalance(state.balance);
+      // Fallback to DB
+      const { data: cached } = await supabase
+        .from('trader_state')
+        .select('balance')
+        .eq('user_id', userId)
+        .maybeSingle();
+      if (cached?.balance !== undefined) {
+        setKrakenBalance(cached.balance);
       }
     } finally {
       setLoadingKraken(false);
     }
-  }, [userId, loadingKraken, lastFetchTime, state?.balance]);
+  }, [userId, loadingKraken, lastFetchTime, hasFetchedOnce]);
 
   useEffect(() => {
     if (!userId) {
@@ -100,7 +121,7 @@ export function useTraderState(userId: string | null, options: UseTraderStateOpt
       return;
     }
 
-    // Fetch initial state
+    // Fetch initial state - IMMEDIATELY set balance from DB first
     const fetchState = async () => {
       const { data, error } = await supabase
         .from('trader_state')
@@ -113,10 +134,9 @@ export function useTraderState(userId: string | null, options: UseTraderStateOpt
       } else if (data) {
         const traderData = data as unknown as TraderState;
         setState(traderData);
-        // Also set kraken balance from DB state immediately
-        if (traderData.balance > 0) {
-          setKrakenBalance(traderData.balance);
-        }
+        // IMMEDIATELY set kraken balance from DB - this is the cached value
+        setKrakenBalance(traderData.balance);
+        console.log('Initial balance from DB:', traderData.balance);
       }
       setLoading(false);
     };
@@ -137,9 +157,14 @@ export function useTraderState(userId: string | null, options: UseTraderStateOpt
       }
     };
 
-    fetchState();
+    // First load DB state immediately, then try to refresh from Kraken
+    fetchState().then(() => {
+      // Small delay to avoid Kraken rate limits
+      setTimeout(() => {
+        fetchKrakenBalance();
+      }, 2000);
+    });
     fetchTrades();
-    fetchKrakenBalance(); // Also fetch real Kraken balance
 
     // Subscribe to realtime updates for trader_state
     const stateChannel = supabase
