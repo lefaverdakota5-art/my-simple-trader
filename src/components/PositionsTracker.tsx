@@ -2,8 +2,10 @@ import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
-import { TrendingUp, TrendingDown, Target, AlertTriangle, RefreshCw, Briefcase } from "lucide-react";
+import { toast } from "sonner";
+import { TrendingUp, TrendingDown, Target, AlertTriangle, RefreshCw, Briefcase, DollarSign } from "lucide-react";
 
 interface Position {
   id: string;
@@ -29,6 +31,7 @@ export function PositionsTracker({ userId }: PositionsTrackerProps) {
   const [positions, setPositions] = useState<Position[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [sellingId, setSellingId] = useState<string | null>(null);
 
   const fetchPositions = async (isManual = false) => {
     if (!userId) return;
@@ -49,6 +52,39 @@ export function PositionsTracker({ userId }: PositionsTrackerProps) {
     } finally {
       setLoading(false);
       setRefreshing(false);
+    }
+  };
+
+  const handleSellPosition = async (position: Position) => {
+    if (sellingId) return;
+    setSellingId(position.id);
+    
+    try {
+      const { data, error } = await supabase.functions.invoke("kraken-withdraw", {
+        body: {
+          action: "sell_crypto",
+          pair: position.pair,
+          volume: position.quantity,
+          position_id: position.id,
+        },
+      });
+
+      if (error) {
+        toast.error("Sell failed: " + error.message);
+        return;
+      }
+
+      if (data?.error) {
+        toast.error(data.error);
+        return;
+      }
+
+      toast.success(data.message || "Position sold successfully!");
+      fetchPositions(true);
+    } catch (err) {
+      toast.error("Sell failed: " + (err instanceof Error ? err.message : "Unknown error"));
+    } finally {
+      setSellingId(null);
     }
   };
 
@@ -231,6 +267,27 @@ export function PositionsTracker({ userId }: PositionsTrackerProps) {
                             </div>
                           </div>
                         </div>
+
+                        {/* Sell Button */}
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          className="w-full mt-3"
+                          onClick={() => handleSellPosition(position)}
+                          disabled={sellingId === position.id}
+                        >
+                          {sellingId === position.id ? (
+                            <>
+                              <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                              Selling...
+                            </>
+                          ) : (
+                            <>
+                              <DollarSign className="h-4 w-4 mr-2" />
+                              Sell Position
+                            </>
+                          )}
+                        </Button>
                       </div>
                     );
                   })}

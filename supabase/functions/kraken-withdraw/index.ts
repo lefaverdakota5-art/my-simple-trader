@@ -486,6 +486,102 @@ serve(async (req) => {
       });
     }
 
+    // Sell crypto (close position)
+    if (action === "sell_crypto") {
+      const pair = String(body?.pair || "");
+      const volume = parseFloat(body?.volume);
+      const positionId = String(body?.position_id || "");
+
+      if (!pair) {
+        return jsonResponse({ error: "Missing pair parameter" }, 400);
+      }
+
+      if (isNaN(volume) || volume <= 0) {
+        return jsonResponse({ error: "Invalid sell volume" }, 400);
+      }
+
+      console.log(`[sell_crypto] Executing SELL: ${volume} of ${pair}`);
+
+      // Get current price
+      const tickerRes = await fetch(`https://api.kraken.com/0/public/Ticker?pair=${pair}`);
+      const tickerData = await tickerRes.json() as { result?: Record<string, { c?: string[] }> };
+      const ticker = tickerData.result ? Object.values(tickerData.result)[0] : null;
+      const currentPrice = ticker?.c?.[0] ? Number(ticker.c[0]) : 0;
+
+      if (!currentPrice) {
+        return jsonResponse({ error: `Could not fetch current price for ${pair}` }, 400);
+      }
+
+      console.log(`[sell_crypto] ${pair} current price: $${currentPrice}`);
+
+      // Get pair info for lot decimals
+      const pairInfoRes = await fetch(`https://api.kraken.com/0/public/AssetPairs?pair=${pair}`);
+      const pairInfoData = await pairInfoRes.json() as { result?: Record<string, { ordermin?: string; lot_decimals?: number }> };
+      const pairInfo = pairInfoData.result ? Object.values(pairInfoData.result)[0] : null;
+      const lotDecimals = pairInfo?.lot_decimals || 8;
+      const volumeStr = volume.toFixed(lotDecimals);
+
+      // Place market SELL order
+      const orderResult = await krakenRequest("/0/private/AddOrder", krakenKey, krakenSecret, {
+        ordertype: "market",
+        type: "sell",
+        volume: volumeStr,
+        pair: pair,
+      });
+
+      console.log(`[sell_crypto] Order result:`, JSON.stringify(orderResult));
+
+      if (orderResult.error && orderResult.error.length > 0) {
+        return jsonResponse({ error: "Sell failed: " + orderResult.error.join(", ") }, 400);
+      }
+
+      const txid = (orderResult.result as { txid?: string[] })?.txid || [];
+      const descr = (orderResult.result as { descr?: { order?: string } })?.descr?.order || "";
+      const saleAmount = volume * currentPrice;
+
+      console.log(`[sell_crypto] Sell executed! TXID: ${txid.join(", ")}, Description: ${descr}`);
+
+      // Update position in database if position_id provided
+      if (positionId) {
+        const { data: positionData } = await supabaseAdmin
+          .from("positions")
+          .select("entry_price, quantity")
+          .eq("id", positionId)
+          .maybeSingle();
+
+        const entryPrice = (positionData as any)?.entry_price || currentPrice;
+        const realizedPnl = (currentPrice - entryPrice) * volume;
+
+        await supabaseAdmin
+          .from("positions")
+          .update({
+            status: "closed",
+            exit_price: currentPrice,
+            exit_txid: txid[0] || null,
+            realized_pnl: realizedPnl,
+            closed_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", positionId);
+      }
+
+      // Record trade message
+      await supabaseAdmin.from("trades").insert({
+        user_id: userId,
+        message: `REAL TRADE: Sold ${volumeStr} ${pair} @ $${currentPrice.toFixed(6)} for $${saleAmount.toFixed(2)}`,
+      });
+
+      return jsonResponse({
+        success: true,
+        message: `Successfully sold ${volumeStr} ${pair.replace("USD", "")} at $${currentPrice.toFixed(6)} for $${saleAmount.toFixed(2)}`,
+        txid: txid,
+        description: descr,
+        volume: volume,
+        price: currentPrice,
+        saleAmount: saleAmount,
+      });
+    }
+
     return jsonResponse({ error: "Unknown action" }, 400);
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Unknown error";
