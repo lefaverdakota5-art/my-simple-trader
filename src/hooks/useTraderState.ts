@@ -36,14 +36,21 @@ export function useTraderState(userId: string | null, options: UseTraderStateOpt
   const [loadingKraken, setLoadingKraken] = useState(false);
   const { playNotificationSound } = useNotificationSound();
 
-  // Fetch real Kraken balance
+  // Fetch real Kraken balance with timeout
   const fetchKrakenBalance = useCallback(async () => {
     if (!userId) return;
     setLoadingKraken(true);
+    
+    // Add timeout to prevent stuck loading state
+    const timeout = setTimeout(() => {
+      setLoadingKraken(false);
+    }, 10000); // 10 second timeout
+    
     try {
       const { data, error } = await supabase.functions.invoke('kraken-withdraw', {
         body: { action: 'get_balance' }
       });
+      clearTimeout(timeout);
       if (!error && data?.success) {
         setKrakenBalance(data.balance);
         // Update the state balance to match Kraken
@@ -51,8 +58,10 @@ export function useTraderState(userId: string | null, options: UseTraderStateOpt
       }
     } catch (e) {
       console.error('Failed to fetch Kraken balance:', e);
+      clearTimeout(timeout);
+    } finally {
+      setLoadingKraken(false);
     }
-    setLoadingKraken(false);
   }, [userId]);
 
   useEffect(() => {
