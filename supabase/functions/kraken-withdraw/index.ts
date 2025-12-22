@@ -370,6 +370,122 @@ serve(async (req) => {
       });
     }
 
+    // Execute a real trade (buy crypto)
+    if (action === "buy_crypto") {
+      const pair = String(body?.pair || "XDGUSD"); // Default to DOGE/USD
+      const amountUsd = parseFloat(body?.amount_usd);
+
+      if (isNaN(amountUsd) || amountUsd <= 0) {
+        return jsonResponse({ error: "Invalid trade amount" }, 400);
+      }
+
+      console.log(`[buy_crypto] Executing BUY: $${amountUsd} of ${pair}`);
+
+      // Get current price to calculate volume
+      const tickerRes = await fetch(`https://api.kraken.com/0/public/Ticker?pair=${pair}`);
+      const tickerData = await tickerRes.json() as { result?: Record<string, { c?: string[] }> };
+      const ticker = tickerData.result ? Object.values(tickerData.result)[0] : null;
+      const currentPrice = ticker?.c?.[0] ? Number(ticker.c[0]) : 0;
+
+      if (!currentPrice) {
+        return jsonResponse({ error: `Could not fetch current price for ${pair}` }, 400);
+      }
+
+      console.log(`[buy_crypto] ${pair} current price: $${currentPrice}`);
+
+      // Get pair info for minimum order size
+      const pairInfoRes = await fetch(`https://api.kraken.com/0/public/AssetPairs?pair=${pair}`);
+      const pairInfoData = await pairInfoRes.json() as { result?: Record<string, { ordermin?: string; lot_decimals?: number }> };
+      const pairInfo = pairInfoData.result ? Object.values(pairInfoData.result)[0] : null;
+      const orderMin = parseFloat(pairInfo?.ordermin || "0");
+      const lotDecimals = pairInfo?.lot_decimals || 8;
+
+      // Calculate volume based on USD amount
+      const volume = amountUsd / currentPrice;
+      const volumeStr = volume.toFixed(lotDecimals);
+
+      console.log(`[buy_crypto] Calculated volume: ${volumeStr} (min: ${orderMin})`);
+
+      if (volume < orderMin) {
+        return jsonResponse({ 
+          error: `Volume ${volumeStr} below minimum ${orderMin} for ${pair}. Need at least $${(orderMin * currentPrice).toFixed(2)} to trade.` 
+        }, 400);
+      }
+
+      // Check Kraken USD balance first
+      const balanceResult = await krakenRequest("/0/private/Balance", krakenKey, krakenSecret);
+      if (balanceResult.error && balanceResult.error.length > 0) {
+        return jsonResponse({ error: "Failed to check balance: " + balanceResult.error.join(", ") }, 400);
+      }
+
+      const balances = balanceResult.result as Record<string, string> || {};
+      const usdBalance = parseFloat(balances["ZUSD"] || balances["USD"] || "0");
+
+      console.log(`[buy_crypto] Kraken USD balance: $${usdBalance}`);
+
+      if (usdBalance < amountUsd) {
+        return jsonResponse({ 
+          error: `Insufficient Kraken USD balance. Available: $${usdBalance.toFixed(2)}, Requested: $${amountUsd.toFixed(2)}` 
+        }, 400);
+      }
+
+      // Place market BUY order
+      const orderResult = await krakenRequest("/0/private/AddOrder", krakenKey, krakenSecret, {
+        ordertype: "market",
+        type: "buy",
+        volume: volumeStr,
+        pair: pair,
+      });
+
+      console.log(`[buy_crypto] Order result:`, JSON.stringify(orderResult));
+
+      if (orderResult.error && orderResult.error.length > 0) {
+        return jsonResponse({ error: "Trade failed: " + orderResult.error.join(", ") }, 400);
+      }
+
+      const txid = (orderResult.result as { txid?: string[] })?.txid || [];
+      const descr = (orderResult.result as { descr?: { order?: string } })?.descr?.order || "";
+
+      console.log(`[buy_crypto] Trade executed! TXID: ${txid.join(", ")}, Description: ${descr}`);
+
+      // Record position in database
+      const { error: positionError } = await supabaseAdmin
+        .from("positions")
+        .insert({
+          user_id: userId,
+          symbol: pair.replace("USD", ""),
+          pair: pair,
+          side: "long",
+          quantity: volume,
+          entry_price: currentPrice,
+          entry_txid: txid[0] || null,
+          status: "open",
+          take_profit_percent: 10,
+          stop_loss_percent: 5,
+        });
+
+      if (positionError) {
+        console.error("Failed to record position:", positionError);
+      }
+
+      // Record trade message
+      await supabaseAdmin.from("trades").insert({
+        user_id: userId,
+        message: `REAL TRADE: Bought ${volumeStr} ${pair} @ $${currentPrice.toFixed(6)} for $${amountUsd.toFixed(2)}`,
+      });
+
+      return jsonResponse({
+        success: true,
+        message: `Successfully bought ${volumeStr} ${pair.replace("USD", "")} at $${currentPrice.toFixed(6)}`,
+        txid: txid,
+        description: descr,
+        volume: volume,
+        price: currentPrice,
+        totalCost: amountUsd,
+        remainingBalance: usdBalance - amountUsd,
+      });
+    }
+
     return jsonResponse({ error: "Unknown action" }, 400);
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Unknown error";
