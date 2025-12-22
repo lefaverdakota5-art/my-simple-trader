@@ -108,70 +108,44 @@ export default function Withdraw() {
     setSubmitting(true);
 
     try {
-      // Create a completed deposit record
-      const { error: depositError } = await supabase
+      // Create a deposit record in the database
+      const { error } = await supabase
         .from('withdrawal_requests')
         .insert({
           user_id: user.id,
           amount: numAmount,
-          status: 'completed',
+          status: 'pending',
           withdraw_type: 'deposit',
           bank_name: chimeDetails.chime_account_name || 'Chime',
         });
 
-      if (depositError) {
+      if (error) {
         toast({
           title: 'Error',
-          description: depositError.message,
-          variant: 'destructive',
-        });
-        setSubmitting(false);
-        return;
-      }
-
-      // Update trader_state balance - add the deposit amount
-      const currentBalance = state?.balance || 0;
-      const newBalance = currentBalance + numAmount;
-      
-      const { error: balanceError } = await supabase
-        .from('trader_state')
-        .update({ 
-          balance: newBalance,
-          updated_at: new Date().toISOString()
-        })
-        .eq('user_id', user.id);
-
-      if (balanceError) {
-        console.error('Failed to update balance:', balanceError);
-        toast({
-          title: 'Warning',
-          description: 'Deposit recorded but balance update failed. Please refresh.',
+          description: error.message,
           variant: 'destructive',
         });
       } else {
         toast({
-          title: '✅ Deposit Complete!',
-          description: `$${numAmount.toFixed(2)} added to your trading balance from ${chimeDetails.chime_account_name || 'Chime'}`,
+          title: '✅ Deposit Request Submitted!',
+          description: `$${numAmount.toFixed(2)} deposit from Chime is being processed`,
         });
+        setAmount('');
+        
+        // Refresh list
+        const { data: withdrawalData } = await supabase
+          .from('withdrawal_requests')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false })
+          .limit(10);
+        
+        if (withdrawalData) setWithdrawals(withdrawalData);
       }
-      
-      setAmount('');
-      
-      // Refresh list
-      const { data: withdrawalData } = await supabase
-        .from('withdrawal_requests')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false })
-        .limit(10);
-      
-      if (withdrawalData) setWithdrawals(withdrawalData);
-      
     } catch (error) {
-      console.error('Deposit error:', error);
       toast({
         title: 'Error',
-        description: 'Failed to process deposit',
+        description: 'Failed to process deposit request',
         variant: 'destructive',
       });
     }
