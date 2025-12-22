@@ -11,16 +11,19 @@ import {
   setKrakenWithdrawKeyUsd,
 } from "@/lib/botApi";
 
-// Validation schema - Kraken for trading
+// Validation schema - Exchange keys
 const apiKeysSchema = z.object({
   krakenKey: z.string().trim(),
   krakenSecret: z.string().trim(),
+  alpacaApiKey: z.string().trim(),
+  alpacaSecret: z.string().trim(),
 }).refine(
   (data) => {
     const partialKraken = (data.krakenKey.length > 0) !== (data.krakenSecret.length > 0);
-    return !partialKraken;
+    const partialAlpaca = (data.alpacaApiKey.length > 0) !== (data.alpacaSecret.length > 0);
+    return !partialKraken && !partialAlpaca;
   },
-  { message: "Please provide both Kraken key and secret, or leave both empty" }
+  { message: "Please provide both key and secret for each exchange, or leave both empty" }
 );
 
 export default function Settings() {
@@ -31,6 +34,9 @@ export default function Settings() {
   const [krakenWithdrawAsset, setKrakenWithdrawAssetState] = useState("ZUSD");
   const [krakenKey, setKrakenKey] = useState("");
   const [krakenSecret, setKrakenSecret] = useState("");
+  const [alpacaApiKey, setAlpacaApiKey] = useState("");
+  const [alpacaSecret, setAlpacaSecret] = useState("");
+  const [alpacaPaper, setAlpacaPaper] = useState(true);
   const [takeProfitPercent, setTakeProfitPercent] = useState(10);
   const [stopLossPercent, setStopLossPercent] = useState(5);
   const [trailingStopPercent, setTrailingStopPercent] = useState(3);
@@ -46,6 +52,7 @@ export default function Settings() {
   const [submittingTpSl, setSubmittingTpSl] = useState(false);
   const [status, setStatus] = useState<{
     krakenOk?: boolean;
+    alpacaOk?: boolean;
     takeProfitPercent?: number;
     stopLossPercent?: number;
     trailingStopPercent?: number;
@@ -434,7 +441,7 @@ export default function Settings() {
 
       <div style={{ marginBottom: "24px" }}>
         <h2 className="medium-text" style={{ fontWeight: 600, marginBottom: "12px" }}>
-          Exchange Keys (Kraken)
+          Exchange Keys
         </h2>
         
         {/* Status indicators */}
@@ -451,40 +458,110 @@ export default function Settings() {
             borderRadius: "8px"
           }}>
             <span style={{ color: status.krakenOk ? "hsl(142, 76%, 36%)" : "hsl(var(--muted-foreground))" }}>
-              {status.krakenOk ? "✓" : "○"} Kraken (Trading)
+              {status.krakenOk ? "✓" : "○"} Kraken (Crypto)
+            </span>
+            <span style={{ color: status.alpacaOk ? "hsl(142, 76%, 36%)" : "hsl(var(--muted-foreground))" }}>
+              {status.alpacaOk ? "✓" : "○"} Alpaca (Stocks)
             </span>
           </div>
         )}
-        
-        <p style={{ color: "hsl(var(--muted-foreground))", fontSize: "0.9rem", marginBottom: "12px" }}>
-          Kraken keys are required for live crypto trading.
-        </p>
 
-        <div style={{ marginBottom: "12px" }}>
-          <label style={{ display: "block", marginBottom: "4px", fontWeight: 500 }}>Kraken API Key</label>
-          <input
-            className="plain-input"
-            type="text"
-            autoCapitalize="none"
-            autoCorrect="off"
-            spellCheck={false}
-            value={krakenKey}
-            onChange={(e) => setKrakenKey(e.target.value)}
-            placeholder="Paste your Kraken API key"
-          />
+        {/* Alpaca Section - Stocks */}
+        <div style={{ 
+          padding: "16px", 
+          marginBottom: "16px",
+          background: "linear-gradient(135deg, hsl(217, 91%, 60%, 0.15), hsl(217, 91%, 60%, 0.05))",
+          borderRadius: "12px",
+          border: "2px solid hsl(217, 91%, 60%, 0.4)"
+        }}>
+          <h3 style={{ fontWeight: 600, marginBottom: "8px", color: "hsl(217, 91%, 60%)" }}>
+            📈 Alpaca (Stocks) - Penny Trades Supported
+          </h3>
+          <p style={{ color: "hsl(var(--muted-foreground))", fontSize: "0.9rem", marginBottom: "12px" }}>
+            Commission-free US stock trading with fractional shares. Supports micro transactions as low as $1!
+          </p>
+          
+          <div style={{ marginBottom: "12px" }}>
+            <label style={{ display: "block", marginBottom: "4px", fontWeight: 500 }}>Alpaca API Key</label>
+            <input
+              className="plain-input"
+              type="text"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              value={alpacaApiKey}
+              onChange={(e) => setAlpacaApiKey(e.target.value)}
+              placeholder="Paste your Alpaca API key"
+            />
+          </div>
+          <div style={{ marginBottom: "12px" }}>
+            <label style={{ display: "block", marginBottom: "4px", fontWeight: 500 }}>Alpaca Secret</label>
+            <input
+              className="plain-input"
+              type="password"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              value={alpacaSecret}
+              onChange={(e) => setAlpacaSecret(e.target.value)}
+              placeholder="Paste your Alpaca secret"
+            />
+          </div>
+          <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+            <input
+              type="checkbox"
+              checked={alpacaPaper}
+              onChange={(e) => setAlpacaPaper(e.target.checked)}
+              style={{ width: "18px", height: "18px" }}
+            />
+            <span style={{ fontWeight: 500 }}>Paper Trading Mode</span>
+            <span style={{ color: "hsl(var(--muted-foreground))", fontSize: "0.85rem" }}>
+              (Use sandbox - recommended for testing)
+            </span>
+          </div>
         </div>
-        <div style={{ marginBottom: "12px" }}>
-          <label style={{ display: "block", marginBottom: "4px", fontWeight: 500 }}>Kraken Secret</label>
-          <input
-            className="plain-input"
-            type="password"
-            autoCapitalize="none"
-            autoCorrect="off"
-            spellCheck={false}
-            value={krakenSecret}
-            onChange={(e) => setKrakenSecret(e.target.value)}
-            placeholder="Paste your Kraken secret"
-          />
+
+        {/* Kraken Section - Crypto */}
+        <div style={{ 
+          padding: "16px", 
+          marginBottom: "16px",
+          background: "hsl(var(--muted) / 0.5)",
+          borderRadius: "12px",
+          border: "1px solid hsl(var(--border))"
+        }}>
+          <h3 style={{ fontWeight: 600, marginBottom: "8px" }}>
+            🪙 Kraken (Crypto)
+          </h3>
+          <p style={{ color: "hsl(var(--muted-foreground))", fontSize: "0.9rem", marginBottom: "12px" }}>
+            For live crypto trading. Supports BTC, ETH, and many other pairs.
+          </p>
+          
+          <div style={{ marginBottom: "12px" }}>
+            <label style={{ display: "block", marginBottom: "4px", fontWeight: 500 }}>Kraken API Key</label>
+            <input
+              className="plain-input"
+              type="text"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              value={krakenKey}
+              onChange={(e) => setKrakenKey(e.target.value)}
+              placeholder="Paste your Kraken API key"
+            />
+          </div>
+          <div style={{ marginBottom: "12px" }}>
+            <label style={{ display: "block", marginBottom: "4px", fontWeight: 500 }}>Kraken Secret</label>
+            <input
+              className="plain-input"
+              type="password"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              value={krakenSecret}
+              onChange={(e) => setKrakenSecret(e.target.value)}
+              placeholder="Paste your Kraken secret"
+            />
+          </div>
         </div>
 
         {validationError && (
@@ -510,6 +587,8 @@ export default function Settings() {
             const validationResult = apiKeysSchema.safeParse({
               krakenKey,
               krakenSecret,
+              alpacaApiKey,
+              alpacaSecret,
             });
             
             if (!validationResult.success) {
@@ -530,6 +609,9 @@ export default function Settings() {
                   action: "set_keys",
                   kraken_key: krakenKey.trim() || null,
                   kraken_secret: krakenSecret.trim() || null,
+                  alpaca_api_key: alpacaApiKey.trim() || null,
+                  alpaca_secret: alpacaSecret.trim() || null,
+                  alpaca_paper: alpacaPaper,
                 },
               });
               if (error) {
@@ -537,9 +619,11 @@ export default function Settings() {
               } else if (resp?.error) {
                 toast({ title: "Failed", description: String(resp.error), variant: "destructive" });
               } else {
-                toast({ title: "Saved", description: "Kraken keys stored securely." });
+                toast({ title: "Saved", description: "Exchange keys stored securely." });
                 setKrakenKey("");
                 setKrakenSecret("");
+                setAlpacaApiKey("");
+                setAlpacaSecret("");
                 // Refresh status
                 const { data: statusData } = await supabase.functions.invoke("bot-actions", {
                   body: { action: "status" },
@@ -552,7 +636,7 @@ export default function Settings() {
           }}
           style={{ fontWeight: 600 }}
         >
-          {submitting ? "Saving..." : "Save Kraken Keys"}
+          {submitting ? "Saving..." : "Save Exchange Keys"}
         </button>
       </div>
 
