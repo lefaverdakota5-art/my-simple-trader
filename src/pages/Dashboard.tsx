@@ -10,6 +10,7 @@ import { CryptoPriceTicker } from "@/components/CryptoPriceTicker";
 import { CryptoMarketGrid } from "@/components/CryptoMarketGrid";
 import { PositionsTracker } from "@/components/PositionsTracker";
 import { GoalTracker10M } from "@/components/GoalTracker10M";
+import { toast } from "sonner";
 import { 
   TrendingUp, 
   TrendingDown, 
@@ -21,7 +22,8 @@ import {
   LogOut,
   Landmark,
   Users,
-  ArrowDownCircle
+  ArrowDownCircle,
+  Zap
 } from "lucide-react";
 
 export default function Dashboard() {
@@ -31,6 +33,7 @@ export default function Dashboard() {
   const [keyStatus, setKeyStatus] = useState<
     null | { ok: boolean; krakenOk?: boolean; plaidOk?: boolean; openaiOk?: boolean }
   >(null);
+  const [tradingLoading, setTradingLoading] = useState(false);
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -88,6 +91,42 @@ export default function Dashboard() {
   const handleLogout = async () => {
     await signOut();
     navigate('/');
+  };
+
+  const handleTestRealTrade = async () => {
+    if (!user) return;
+    
+    setTradingLoading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("kraken-withdraw", {
+        body: { 
+          action: "buy_crypto",
+          pair: "XDGUSD", // DOGE/USD
+          amount_usd: 1.0  // $1 trade
+        },
+      });
+      
+      if (error) {
+        toast.error("Trade failed: " + error.message);
+        return;
+      }
+      
+      if (data?.error) {
+        toast.error(data.error);
+        return;
+      }
+      
+      toast.success(data.message || "Trade executed successfully!");
+      console.log("Trade result:", data);
+      
+      // Refresh Kraken balance after trade
+      refreshKrakenBalance();
+      
+    } catch (err) {
+      toast.error("Trade failed: " + (err instanceof Error ? err.message : "Unknown error"));
+    } finally {
+      setTradingLoading(false);
+    }
   };
 
   const profitIsPositive = (state?.todays_profit || 0) >= 0;
@@ -275,7 +314,16 @@ export default function Dashboard() {
       </div>
 
       {/* Control Buttons */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
+        <button
+          onClick={handleTestRealTrade}
+          disabled={tradingLoading}
+          className="p-4 rounded-lg border-2 border-primary bg-primary/10 hover:bg-primary/20 text-primary font-semibold transition-all disabled:opacity-50"
+        >
+          <Zap className="h-5 w-5 mx-auto mb-1" />
+          {tradingLoading ? 'Trading...' : 'Test Trade $1'}
+        </button>
+
         <button
           onClick={toggleSwarm}
           className={`p-4 rounded-lg border-2 font-semibold transition-all ${
