@@ -21,12 +21,10 @@ export default function Withdraw() {
   const navigate = useNavigate();
   const botApiBase = getBotApiBaseUrl();
   
-  const [amount, setAmount] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [withdrawals, setWithdrawals] = useState<WithdrawalRequest[]>([]);
   const [krakenBalance, setKrakenBalance] = useState<number | null>(null);
   const [loadingKrakenBalance, setLoadingKrakenBalance] = useState(false);
-  const [krakenWithdrawKey, setKrakenWithdrawKey] = useState("");
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -34,12 +32,11 @@ export default function Withdraw() {
     }
   }, [user, authLoading, navigate]);
 
-  // Fetch existing withdrawal requests and settings
+  // Fetch existing withdrawal requests
   useEffect(() => {
     if (!user) return;
     
     const fetchData = async () => {
-      // Fetch withdrawals
       const { data: withdrawalData } = await supabase
         .from('withdrawal_requests')
         .select('*')
@@ -48,17 +45,6 @@ export default function Withdraw() {
         .limit(10);
       
       if (withdrawalData) setWithdrawals(withdrawalData);
-      
-      // Fetch Kraken withdrawal key
-      const { data: keysData } = await supabase
-        .from('user_exchange_keys')
-        .select('kraken_withdraw_key')
-        .eq('user_id', user.id)
-        .maybeSingle();
-      
-      if (keysData?.kraken_withdraw_key) {
-        setKrakenWithdrawKey(keysData.kraken_withdraw_key);
-      }
     };
 
     fetchData();
@@ -90,88 +76,6 @@ export default function Withdraw() {
   }, [user]);
 
   const getAccessToken = async () => getSupabaseAccessToken();
-
-  // Withdraw from Kraken to bank
-  const handleWithdrawToBank = async () => {
-    if (!user) return;
-    
-    const numAmount = parseFloat(amount);
-    if (isNaN(numAmount) || numAmount <= 0) {
-      toast({
-        title: 'Error',
-        description: 'Please enter a valid amount',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    if (!krakenWithdrawKey.trim()) {
-      toast({
-        title: 'Missing Kraken Withdrawal Key',
-        description: 'Please add your bank as a withdrawal address in Kraken, then enter the key name in Settings.',
-        variant: 'destructive',
-      });
-      navigate('/settings');
-      return;
-    }
-
-    // Check against Kraken balance
-    if (krakenBalance !== null && numAmount > krakenBalance) {
-      toast({
-        title: 'Insufficient Kraken Balance',
-        description: `Your Kraken USD balance is $${krakenBalance.toFixed(2)}.`,
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    setSubmitting(true);
-
-    try {
-      const { data, error } = await supabase.functions.invoke('kraken-withdraw', {
-        body: { 
-          action: 'withdraw_to_bank',
-          amount: numAmount,
-          withdraw_key: krakenWithdrawKey,
-          asset: 'USD'
-        }
-      });
-
-      if (error || !data?.success) {
-        toast({
-          title: 'Withdrawal Failed',
-          description: data?.error || error?.message || 'Failed to initiate withdrawal',
-          variant: 'destructive',
-        });
-      } else {
-        toast({
-          title: '✅ Withdrawal Initiated!',
-          description: data.message || `$${numAmount.toFixed(2)} will be sent to your bank`,
-        });
-        setAmount('');
-        
-        // Refresh Kraken balance and withdrawal list
-        fetchKrakenBalance();
-        const { data: withdrawalData } = await supabase
-          .from('withdrawal_requests')
-          .select('*')
-          .eq('user_id', user.id)
-          .order('created_at', { ascending: false })
-          .limit(10);
-        
-        if (withdrawalData) setWithdrawals(withdrawalData);
-      }
-    } catch (error) {
-      console.error('Withdrawal error:', error);
-      toast({
-        title: 'Error',
-        description: 'Failed to process withdrawal request',
-        variant: 'destructive',
-      });
-    }
-
-    setSubmitting(false);
-  };
 
   const handleSellToCash = async () => {
     if (!botApiBase) {
@@ -256,7 +160,7 @@ export default function Withdraw() {
           border: '1px solid hsl(280, 84%, 50%, 0.3)'
         }}>
           <p style={{ fontSize: '0.875rem', color: 'hsl(280, 84%, 50%)', marginBottom: '4px' }}>
-            🏦 Kraken USD Balance
+            🏦 Kraken USD
           </p>
           <p style={{ fontSize: '1.5rem', fontWeight: '600' }}>
             {loadingKrakenBalance ? 'Loading...' : formatMoney(krakenBalance || 0)}
@@ -272,33 +176,48 @@ export default function Withdraw() {
         </div>
       </div>
 
-      {/* Deposit Section */}
+      {/* How It Works */}
       <div style={{ 
         padding: '20px', 
         marginBottom: '24px',
-        background: 'linear-gradient(135deg, hsl(160, 84%, 39%, 0.15), hsl(160, 84%, 39%, 0.05))',
+        background: 'linear-gradient(135deg, hsl(280, 84%, 50%, 0.15), hsl(280, 84%, 50%, 0.05))',
         borderRadius: '12px',
-        border: '2px solid hsl(160, 84%, 39%, 0.4)'
+        border: '2px solid hsl(280, 84%, 50%, 0.4)'
       }}>
-        <h2 style={{ fontWeight: '600', marginBottom: '8px', color: 'hsl(160, 84%, 39%)' }}>
-          💰 Deposit Funds
+        <h2 style={{ fontWeight: '600', marginBottom: '12px', color: 'hsl(280, 84%, 50%)' }}>
+          🏦 How Banking Works
         </h2>
         <p style={{ color: 'hsl(var(--muted-foreground))', fontSize: '0.9rem', marginBottom: '16px' }}>
-          Deposit money directly to your Kraken account through the Kraken app or website.
-          Once funded, the trading bot will use your Kraken balance.
+          All deposits and withdrawals are handled through the Kraken app. This gives you full control over your money.
         </p>
         
         <div style={{ 
-          padding: '12px', 
+          padding: '16px', 
+          background: 'hsl(var(--muted) / 0.5)',
+          borderRadius: '8px',
+          marginBottom: '12px'
+        }}>
+          <p style={{ fontWeight: '600', marginBottom: '8px', color: 'hsl(160, 84%, 39%)' }}>💰 To Add Funds:</p>
+          <ol style={{ margin: 0, paddingLeft: '20px', fontSize: '0.9rem' }}>
+            <li>Open the Kraken app</li>
+            <li>Go to Portfolio → Deposit → USD</li>
+            <li>Choose your deposit method</li>
+            <li>Once funded, the bot uses your Kraken balance for trading</li>
+          </ol>
+        </div>
+        
+        <div style={{ 
+          padding: '16px', 
           background: 'hsl(var(--muted) / 0.5)',
           borderRadius: '8px',
           marginBottom: '16px'
         }}>
+          <p style={{ fontWeight: '600', marginBottom: '8px', color: 'hsl(220, 84%, 50%)' }}>💸 To Withdraw:</p>
           <ol style={{ margin: 0, paddingLeft: '20px', fontSize: '0.9rem' }}>
-            <li>Open Kraken app or website</li>
-            <li>Go to Portfolio → Deposit → USD</li>
-            <li>Choose deposit method (bank, wire, etc.)</li>
-            <li>Complete the transfer</li>
+            <li>Open the Kraken app</li>
+            <li>Go to Portfolio → Withdraw → USD</li>
+            <li>Send to your Chime or other bank</li>
+            <li>Funds arrive in 1-3 business days</li>
           </ol>
         </div>
         
@@ -310,119 +229,38 @@ export default function Withdraw() {
           style={{ 
             display: 'inline-block',
             fontWeight: '600', 
-            background: 'hsl(160, 84%, 39%)', 
+            background: 'hsl(280, 84%, 50%)', 
             color: 'white', 
             padding: '14px 24px',
             textDecoration: 'none'
           }}
         >
-          Open Kraken to Deposit →
+          Open Kraken App →
         </a>
       </div>
 
-      {/* Withdraw Section */}
+      {/* Sell to Cash Option */}
       <div style={{ 
-        padding: '20px', 
+        padding: '16px', 
         marginBottom: '24px',
-        background: 'linear-gradient(135deg, hsl(220, 84%, 50%, 0.15), hsl(220, 84%, 50%, 0.05))',
-        borderRadius: '12px',
-        border: '2px solid hsl(220, 84%, 50%, 0.4)'
+        background: 'hsl(var(--muted))', 
+        borderRadius: '8px'
       }}>
-        <h2 style={{ fontWeight: '600', marginBottom: '8px', color: 'hsl(220, 84%, 50%)' }}>
-          💸 Withdraw to Bank
-        </h2>
-        <p style={{ color: 'hsl(var(--muted-foreground))', fontSize: '0.9rem', marginBottom: '16px' }}>
-          {krakenWithdrawKey 
-            ? `Withdraw USD from Kraken to your saved bank (${krakenWithdrawKey})`
-            : 'Set up a withdrawal destination in Kraken first, then configure it in Settings.'
-          }
+        <h3 style={{ fontWeight: '600', marginBottom: '8px' }}>
+          Convert Positions to Cash
+        </h3>
+        <p style={{ color: 'hsl(var(--muted-foreground))', fontSize: '0.9rem', marginBottom: '12px' }}>
+          Sell all open crypto positions and convert to USD in Kraken.
         </p>
-        
-        {krakenWithdrawKey ? (
-          <>
-            <div style={{ marginBottom: '16px' }}>
-              <label style={{ display: 'block', marginBottom: '4px', fontWeight: '500' }}>
-                Amount to Withdraw
-              </label>
-              <input
-                type="number"
-                className="plain-input"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                placeholder="0.00"
-                min="0"
-                step="0.01"
-                style={{ fontSize: '1.2rem', padding: '12px' }}
-              />
-              <p style={{ fontSize: '0.75rem', color: 'hsl(var(--muted-foreground))', marginTop: '4px' }}>
-                Available: {formatMoney(krakenBalance || 0)}
-              </p>
-            </div>
-            
-            <button
-              className="plain-button"
-              onClick={handleWithdrawToBank}
-              disabled={submitting || !amount}
-              style={{ 
-                fontWeight: '600', 
-                background: 'hsl(220, 84%, 50%)', 
-                color: 'white',
-                padding: '14px 24px',
-                fontSize: '1rem'
-              }}
-            >
-              {submitting ? 'Processing...' : 'Withdraw to Bank'}
-            </button>
-          </>
-        ) : (
-          <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-            <a 
-              href="https://www.kraken.com/sign-in" 
-              target="_blank" 
-              rel="noopener noreferrer"
-              className="plain-button"
-              style={{ 
-                display: 'inline-block',
-                fontWeight: '600', 
-                background: 'hsl(220, 84%, 50%)', 
-                color: 'white', 
-                padding: '14px 24px',
-                textDecoration: 'none'
-              }}
-            >
-              Open Kraken to Withdraw →
-            </a>
-            <button
-              className="plain-button"
-              onClick={() => navigate('/settings')}
-              style={{ fontWeight: '600' }}
-            >
-              Configure in Settings
-            </button>
-          </div>
-        )}
+        <button
+          className="plain-button"
+          onClick={handleSellToCash}
+          disabled={submitting}
+          style={{ fontWeight: '600' }}
+        >
+          {submitting ? 'Please wait...' : 'Sell All to Cash'}
+        </button>
       </div>
-
-      {/* Other Options */}
-      <details style={{ marginBottom: '24px' }}>
-        <summary style={{ cursor: 'pointer', fontWeight: '600', marginBottom: '12px' }}>
-          Other Options
-        </summary>
-        
-        <div style={{ padding: '16px', background: 'hsl(var(--muted))', borderRadius: '8px', marginTop: '12px' }}>
-          <button
-            className="plain-button"
-            onClick={handleSellToCash}
-            disabled={submitting}
-            style={{ marginBottom: '8px', fontWeight: '600', width: '100%' }}
-          >
-            {submitting ? 'Please wait...' : 'Sell All Positions to Cash'}
-          </button>
-          <p style={{ fontSize: '0.8rem', color: 'hsl(var(--muted-foreground))' }}>
-            Converts all open positions to USD in Kraken
-          </p>
-        </div>
-      </details>
 
       {/* Withdrawal Status */}
       {state?.withdraw_status && (
@@ -433,7 +271,7 @@ export default function Withdraw() {
 
       {/* Recent Transactions */}
       {withdrawals.length > 0 && (
-        <div style={{ marginTop: '32px' }}>
+        <div style={{ marginTop: '24px' }}>
           <h2 className="medium-text" style={{ fontWeight: '600', marginBottom: '12px' }}>
             Recent Transactions
           </h2>
@@ -456,7 +294,7 @@ export default function Withdraw() {
                       {isDeposit ? 'Deposit' : 'Withdrawal'}: {formatMoney(w.amount)}
                     </p>
                     <p style={{ color: 'hsl(var(--muted-foreground))', fontSize: '0.875rem' }}>
-                      {w.bank_name || 'Bank'} • {w.status} • {new Date(w.created_at).toLocaleDateString()}
+                      {w.status} • {new Date(w.created_at).toLocaleDateString()}
                     </p>
                   </div>
                   <p style={{ 
