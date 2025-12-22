@@ -680,6 +680,88 @@ class UserBot:
     def _maybe_inc_orders(self) -> None:
         self._orders_today += 1
 
+    def _get_trader_state_balance(self) -> float:
+        """Get current balance from trader_state in Supabase."""
+        if not SETTINGS.supabase_url or not SETTINGS.supabase_service_role_key:
+            return 0.0
+        try:
+            row = _supabase_get_row(
+                "trader_state",
+                "balance",
+                {"user_id": f"eq.{self._user_id}"}
+            )
+            if row and "balance" in row:
+                return float(row["balance"])
+            return 0.0
+        except Exception as e:
+            print(f"[trader-state] get balance failed: {e}")
+            return 0.0
+
+    def _update_trader_state_balance(self, new_balance: float) -> None:
+        """Update balance in trader_state in Supabase."""
+        if not SETTINGS.supabase_url or not SETTINGS.supabase_service_role_key:
+            return
+        try:
+            endpoint = f"{SETTINGS.supabase_url.rstrip('/')}/rest/v1/trader_state"
+            headers = {
+                "apikey": SETTINGS.supabase_service_role_key,
+                "Authorization": f"Bearer {SETTINGS.supabase_service_role_key}",
+                "Content-Type": "application/json",
+            }
+            data = {
+                "user_id": self._user_id,
+                "balance": new_balance,
+                "updated_at": datetime.now(tz=UTC).isoformat(),
+            }
+            r = requests.post(
+                endpoint,
+                headers={**headers, "Prefer": "resolution=merge-duplicates"},
+                json=data,
+                timeout=10,
+            )
+            r.raise_for_status()
+        except Exception as e:
+            print(f"[trader-state] update balance failed: {e}")
+
+    def _kraken_get_portfolio_value(self) -> float | None:
+        """Get total portfolio value from Kraken (all balances in USD equivalent)."""
+        if not self._kraken:
+            return None
+        try:
+            bal = self._kraken.get_account_balance()
+            total_usd = 0.0
+            
+            for asset, row in bal.iterrows():
+                try:
+                    amount = float(row.iloc[0])
+                except Exception:
+                    continue
+                if amount <= 0:
+                    continue
+                    
+                # USD-like assets are 1:1
+                if str(asset) in {"ZUSD", "USD", "USDT", "USDC"}:
+                    total_usd += amount
+                else:
+                    # For other assets, try to get USD price
+                    try:
+                        # Get ticker for this asset paired with USD
+                        k = self._kraken.api
+                        asset_pairs = _kraken_public(k, "AssetPairs")
+                        pair_info = _kraken_find_usd_pair(str(asset), asset_pairs)
+                        if pair_info:
+                            pair_name, _ = pair_info
+                            last, _ = _kraken_public_ticker(pair_name)
+                            if last:
+                                total_usd += amount * last
+                    except Exception:
+                        continue
+            
+            return total_usd
+        except Exception as e:
+            print(f"[kraken] get portfolio value failed: {e}")
+            return None
+
     def _alpaca_equity(self) -> tuple[float | None, float | None]:
         if not self._alpaca:
             return None, None
@@ -692,6 +774,97 @@ class UserBot:
             print(f"[alpaca] get_account failed: {e}")
             return None, None
 
+    def _kraken_trade_one_pair(self, pair: str) -> None:
+        """Execute a Kraken buy order using trader_state balance."""
+        if not self._kraken:
+            return
+        if self._settings.trading_mode not in {"paper", "live"}:
+            return
+        if not _kraken_trading_enabled():
+            self._push.send_update(
+                user_id=self._user_id,
+                new_trade="Kraken trading is disabled. Set KRAKEN_ENABLE_TRADING=true to enable."
+            )
+            return
+        if not self._orders_left():
+            return
+        
+        # Check trader_state balance before placing trade
+        current_balance = self._get_trader_state_balance()
+        trade_amount = self._settings.max_notional_per_order_usd
+        
+        if current_balance < trade_amount:
+            self._push.send_update(
+                user_id=self._user_id,
+                new_trade=f"Insufficient balance for trade: ${current_balance:.2f} < ${trade_amount:.2f}"
+            )
+            return
+        
+        try:
+            # Get pair information for precision
+            k = self._kraken.api
+            asset_pairs = _kraken_public(k, "AssetPairs")
+            
+            # Find the pair info
+            pair_meta = asset_pairs.get(pair)
+            if not pair_meta:
+                self._push.send_update(
+                    user_id=self._user_id,
+                    new_trade=f"Kraken pair {pair} not found"
+                )
+                return
+            
+            # Get current price
+            last_price, _ = _kraken_public_ticker(pair)
+            if not last_price or last_price <= 0:
+                self._push.send_update(
+                    user_id=self._user_id,
+                    new_trade=f"Could not get price for {pair}"
+                )
+                return
+            
+            # Calculate volume to buy with trade_amount USD
+            lot_decimals = int(pair_meta.get("lot_decimals", 8))
+            volume = _round_down(trade_amount / last_price, lot_decimals)
+            
+            # Check minimum order size
+            order_min = float(pair_meta.get("ordermin", 0))
+            if volume < order_min:
+                self._push.send_update(
+                    user_id=self._user_id,
+                    new_trade=f"Volume {volume} below minimum {order_min} for {pair}"
+                )
+                return
+            
+            # Place market buy order
+            order = _kraken_private(
+                k,
+                "AddOrder",
+                {
+                    "pair": pair,
+                    "type": "buy",
+                    "ordertype": "market",
+                    "volume": f"{volume:.{lot_decimals}f}",
+                },
+            )
+            
+            self._maybe_inc_orders()
+            
+            # Deduct from trader_state balance
+            new_balance = current_balance - trade_amount
+            self._update_trader_state_balance(new_balance)
+            
+            txid = order.get("txid", ["unknown"])[0] if isinstance(order.get("txid"), list) else "unknown"
+            self._push.send_update(
+                user_id=self._user_id,
+                new_trade=f"Placed Kraken BUY {pair} {volume:.{lot_decimals}f} (~${trade_amount:.2f}) txid:{txid} (New balance: ${new_balance:.2f})",
+            )
+        except Exception as e:
+            self._push.send_update(
+                user_id=self._user_id,
+                new_trade=f"Kraken order failed ({pair}): {e}"
+            )
+
     def _alpaca_trade_one_symbol(self, symbol: str) -> None:
         if not self._alpaca:
             return
@@ -699,18 +872,35 @@ class UserBot:
             return
         if not self._orders_left():
             return
+        
+        # Check trader_state balance before placing trade
+        current_balance = self._get_trader_state_balance()
+        trade_amount = self._settings.max_notional_per_order_usd
+        
+        if current_balance < trade_amount:
+            self._push.send_update(
+                user_id=self._user_id,
+                new_trade=f"Insufficient balance for trade: ${current_balance:.2f} < ${trade_amount:.2f}"
+            )
+            return
+        
         try:
             req = MarketOrderRequest(
                 symbol=symbol,
-                notional=self._settings.max_notional_per_order_usd,
+                notional=trade_amount,
                 side=OrderSide.BUY,
                 time_in_force=TimeInForce.DAY,
             )
             self._alpaca.submit_order(req)
             self._maybe_inc_orders()
+            
+            # Deduct from trader_state balance
+            new_balance = current_balance - trade_amount
+            self._update_trader_state_balance(new_balance)
+            
             self._push.send_update(
                 user_id=self._user_id,
-                new_trade=f"Placed Alpaca BUY {symbol} ${self._settings.max_notional_per_order_usd:.2f}",
+                new_trade=f"Placed Alpaca BUY {symbol} ${trade_amount:.2f} (New balance: ${new_balance:.2f})",
             )
         except Exception as e:
             self._push.send_update(user_id=self._user_id, new_trade=f"Alpaca order failed ({symbol}): {e}")
@@ -738,7 +928,11 @@ class UserBot:
         while True:
             self._roll_day()
 
-            cash, equity = self._alpaca_equity()
+            # Get trader_state balance (deposited funds)
+            trader_balance = self._get_trader_state_balance()
+            
+            # Get Kraken portfolio value
+            portfolio_value = self._kraken_get_portfolio_value()
 
             # Minimal council update using a cheap price-change proxy (no heavy data dependencies).
             pct_change = None
@@ -765,9 +959,9 @@ class UserBot:
             
             self._push.send_update(
                 user_id=self._user_id,
-                balance=cash,
+                balance=trader_balance,
                 today_pl=0.0,
-                portfolio_value=equity,
+                portfolio_value=portfolio_value,
                 progress_percent=0.0,
                 win_rate=0.0,
                 council_votes=votes,
@@ -775,10 +969,9 @@ class UserBot:
             )
 
             if approved:
-                # In this minimal working version, place a tiny Alpaca order when approved.
-                # This is intentionally conservative; expand symbols/strategies once stable.
-                for symbol in self._settings.alpaca_symbols:
-                    self._alpaca_trade_one_symbol(symbol)
+                # Place a Kraken order when approved
+                for pair in self._settings.kraken_pairs:
+                    self._kraken_trade_one_pair(pair)
                     break
 
             await asyncio.sleep(self._settings.tick_interval_seconds)

@@ -105,34 +105,55 @@ export default function Withdraw() {
       return;
     }
 
+    if (!botApiBase) {
+      toast({
+        title: 'Backend not configured',
+        description: 'Set VITE_BOT_API_URL so the app can reach your bot service.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     setSubmitting(true);
 
     try {
-      // Create a deposit record in the database
-      const { error } = await supabase
-        .from('withdrawal_requests')
-        .insert({
-          user_id: user.id,
-          amount: numAmount,
-          status: 'pending',
-          withdraw_type: 'deposit',
-          bank_name: chimeDetails.chime_account_name || 'Chime',
-        });
-
-      if (error) {
+      // Call backend API to process deposit and update balance
+      const token = await getAccessToken();
+      if (!token) {
         toast({
           title: 'Error',
-          description: error.message,
+          description: 'Authentication token not available',
+          variant: 'destructive',
+        });
+        setSubmitting(false);
+        return;
+      }
+
+      const r = await fetch(`${botApiBase}/deposit/from_chime`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ amount: numAmount }),
+      });
+
+      const data = await r.json();
+
+      if (!r.ok) {
+        toast({
+          title: 'Deposit Failed',
+          description: data?.error || 'Unknown error',
           variant: 'destructive',
         });
       } else {
         toast({
-          title: '✅ Deposit Request Submitted!',
-          description: `$${numAmount.toFixed(2)} deposit from Chime is being processed`,
+          title: '✅ Deposit Successful!',
+          description: `$${numAmount.toFixed(2)} deposited from Chime. New balance: $${data.new_balance.toFixed(2)}`,
         });
         setAmount('');
         
-        // Refresh list
+        // Refresh withdrawal list to show the deposit transaction
         const { data: withdrawalData } = await supabase
           .from('withdrawal_requests')
           .select('*')
