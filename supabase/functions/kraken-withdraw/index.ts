@@ -127,11 +127,36 @@ serve(async (req) => {
       
       if (result.error && result.error.length > 0) {
         console.error("Kraken balance error:", result.error);
+        
+        // On rate limit, get cached balance from trader_state
+        if (result.error.some((e: string) => e.includes("Rate limit"))) {
+          const { data: cachedState } = await supabaseAdmin
+            .from("trader_state")
+            .select("balance")
+            .eq("user_id", userId)
+            .maybeSingle();
+          
+          const cachedBalance = cachedState?.balance ?? 0;
+          console.log("Using cached balance due to rate limit:", cachedBalance);
+          return jsonResponse({ 
+            success: true, 
+            balance: cachedBalance,
+            cached: true,
+            message: "Using cached balance (rate limited)"
+          });
+        }
+        
         return jsonResponse({ error: result.error.join(", ") }, 400);
       }
 
       const balances = result.result as Record<string, string> || {};
       const usdBalance = parseFloat(balances["ZUSD"] || balances["USD"] || "0");
+      
+      // Also update trader_state with fresh balance
+      await supabaseAdmin
+        .from("trader_state")
+        .update({ balance: usdBalance, updated_at: new Date().toISOString() })
+        .eq("user_id", userId);
       
       return jsonResponse({ 
         success: true, 
