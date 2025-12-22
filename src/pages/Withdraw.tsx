@@ -108,40 +108,66 @@ export default function Withdraw() {
     setSubmitting(true);
 
     try {
-      // Create a deposit record in the database
-      const { error } = await supabase
+      // Create a deposit record first
+      const { data: insertData, error: insertError } = await supabase
         .from('withdrawal_requests')
         .insert({
           user_id: user.id,
           amount: numAmount,
-          status: 'pending',
+          status: 'processing',
           withdraw_type: 'deposit',
           bank_name: chimeDetails.chime_account_name || 'Chime',
+        })
+        .select()
+        .single();
+
+      if (insertError) {
+        toast({
+          title: 'Error',
+          description: insertError.message,
+          variant: 'destructive',
         });
+        setSubmitting(false);
+        return;
+      }
+
+      // Call edge function to process deposit and update balance
+      const { data, error } = await supabase.functions.invoke('bot-actions', {
+        body: { 
+          action: 'deposit', 
+          amount: numAmount,
+          request_id: insertData.id
+        },
+      });
 
       if (error) {
         toast({
           title: 'Error',
-          description: error.message,
+          description: error.message || 'Failed to process deposit',
           variant: 'destructive',
         });
+        // Revert status to failed
+        await supabase
+          .from('withdrawal_requests')
+          .update({ status: 'failed' })
+          .eq('id', insertData.id);
       } else {
         toast({
-          title: '✅ Deposit Request Submitted!',
-          description: `$${numAmount.toFixed(2)} deposit from Chime is being processed`,
+          title: '✅ Deposit Successful!',
+          description: `$${numAmount.toFixed(2)} deposited from Chime. New balance: $${data?.newBalance?.toFixed(2) || numAmount.toFixed(2)}`,
         });
         setAmount('');
-        
-        // Refresh list
-        const { data: withdrawalData } = await supabase
-          .from('withdrawal_requests')
-          .select('*')
-          .eq('user_id', user.id)
-          .order('created_at', { ascending: false })
-          .limit(10);
-        
-        if (withdrawalData) setWithdrawals(withdrawalData);
       }
+      
+      // Refresh list
+      const { data: withdrawalData } = await supabase
+        .from('withdrawal_requests')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(10);
+      
+      if (withdrawalData) setWithdrawals(withdrawalData);
     } catch (error) {
       toast({
         title: 'Error',
@@ -189,38 +215,73 @@ export default function Withdraw() {
 
     setSubmitting(true);
 
-    const { error } = await supabase
-      .from('withdrawal_requests')
-      .insert({
-        user_id: user.id,
-        amount: numAmount,
-        status: 'pending',
-        withdraw_type: 'chime_direct',
-        bank_name: chimeDetails.chime_account_name || 'Chime',
+    try {
+      // Create a withdrawal record first
+      const { data: insertData, error: insertError } = await supabase
+        .from('withdrawal_requests')
+        .insert({
+          user_id: user.id,
+          amount: numAmount,
+          status: 'processing',
+          withdraw_type: 'chime_direct',
+          bank_name: chimeDetails.chime_account_name || 'Chime',
+        })
+        .select()
+        .single();
+
+      if (insertError) {
+        toast({
+          title: 'Error',
+          description: insertError.message,
+          variant: 'destructive',
+        });
+        setSubmitting(false);
+        return;
+      }
+
+      // Call edge function to process withdrawal and update balance
+      const { data, error } = await supabase.functions.invoke('bot-actions', {
+        body: { 
+          action: 'withdraw', 
+          amount: numAmount,
+          request_id: insertData.id
+        },
       });
 
-    if (error) {
-      toast({
-        title: 'Error',
-        description: error.message,
-        variant: 'destructive',
-      });
-    } else {
-      toast({
-        title: '✅ Withdrawal Submitted!',
-        description: `$${numAmount.toFixed(2)} will be sent to your Chime account (${chimeDetails.chime_account_name || 'Chime'})`,
-      });
-      setAmount('');
+      if (error) {
+        toast({
+          title: 'Error',
+          description: error.message || 'Failed to process withdrawal',
+          variant: 'destructive',
+        });
+        // Revert status to failed
+        await supabase
+          .from('withdrawal_requests')
+          .update({ status: 'failed' })
+          .eq('id', insertData.id);
+      } else {
+        toast({
+          title: '✅ Withdrawal Successful!',
+          description: `$${numAmount.toFixed(2)} sent to ${chimeDetails.chime_account_name || 'Chime'}. New balance: $${data?.newBalance?.toFixed(2) || '0.00'}`,
+        });
+        setAmount('');
+      }
       
       // Refresh withdrawals list
-      const { data } = await supabase
+      const { data: withdrawalData } = await supabase
         .from('withdrawal_requests')
         .select('*')
         .eq('user_id', user.id)
         .order('created_at', { ascending: false })
         .limit(10);
       
-      if (data) setWithdrawals(data);
+      if (withdrawalData) setWithdrawals(withdrawalData);
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: 'Failed to process withdrawal',
+        variant: 'destructive',
+      });
     }
 
     setSubmitting(false);
