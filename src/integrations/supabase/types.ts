@@ -268,6 +268,7 @@ export type Database = {
           id: string
           kraken_key: string | null
           kraken_secret: string | null
+          kraken_withdraw_key: string | null
           max_position_percent: number | null
           openai_api_key: string | null
           openai_enabled: boolean | null
@@ -292,6 +293,7 @@ export type Database = {
           id?: string
           kraken_key?: string | null
           kraken_secret?: string | null
+          kraken_withdraw_key?: string | null
           max_position_percent?: number | null
           openai_api_key?: string | null
           openai_enabled?: boolean | null
@@ -316,6 +318,7 @@ export type Database = {
           id?: string
           kraken_key?: string | null
           kraken_secret?: string | null
+          kraken_withdraw_key?: string | null
           max_position_percent?: number | null
           openai_api_key?: string | null
           openai_enabled?: boolean | null

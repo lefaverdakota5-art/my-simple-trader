@@ -106,10 +106,10 @@ serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     const action = String(body?.action ?? "");
 
-    // Get user's Kraken API keys
+    // Get user's Kraken API keys and withdrawal settings
     const { data: keysData, error: keysError } = await supabaseAdmin
       .from("user_exchange_keys")
-      .select("kraken_key, kraken_secret, chime_account_name")
+      .select("kraken_key, kraken_secret, chime_account_name, kraken_withdraw_key")
       .eq("user_id", userId)
       .maybeSingle();
 
@@ -119,6 +119,7 @@ serve(async (req) => {
 
     const krakenKey = keysData.kraken_key;
     const krakenSecret = keysData.kraken_secret;
+    const savedWithdrawKey = keysData.kraken_withdraw_key;
 
     if (action === "get_balance") {
       // Get Kraken account balance
@@ -141,8 +142,9 @@ serve(async (req) => {
 
     if (action === "withdraw_to_chime") {
       const amount = parseFloat(body?.amount);
-      const withdrawKey = String(body?.withdraw_key || "").trim();
-      const asset = String(body?.asset || "ZUSD");
+      // Use withdraw_key from request body, fall back to saved key in database
+      const withdrawKey = String(body?.withdraw_key || savedWithdrawKey || "").trim();
+      const asset = String(body?.asset || "USD");
 
       if (isNaN(amount) || amount <= 0) {
         return jsonResponse({ error: "Invalid withdrawal amount" }, 400);
@@ -150,9 +152,11 @@ serve(async (req) => {
 
       if (!withdrawKey) {
         return jsonResponse({ 
-          error: "Missing Kraken withdrawal key. Please set up a withdrawal address for your Chime account in Kraken and enter the key name in Settings." 
+          error: "Missing Kraken withdrawal key. Please add your Chime bank as a withdrawal address in Kraken, then enter the key name in Settings." 
         }, 400);
       }
+
+      console.log(`Initiating withdrawal: $${amount} to key "${withdrawKey}", asset: ${asset}`);
 
       // First check if we have sufficient balance
       const balanceResult = await krakenRequest("/0/private/Balance", krakenKey, krakenSecret);
