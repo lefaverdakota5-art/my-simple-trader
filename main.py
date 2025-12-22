@@ -777,26 +777,35 @@ class UserBot:
     def _kraken_trade_one_pair(self, pair: str) -> None:
         """Execute a Kraken buy order using trader_state balance."""
         if not self._kraken:
+            print(f"[kraken-trade] Skipped {pair}: No Kraken client configured")
             return
         if self._settings.trading_mode not in {"paper", "live"}:
+            print(f"[kraken-trade] Skipped {pair}: Trading mode is {self._settings.trading_mode}")
             return
         if not _kraken_trading_enabled():
+            msg = "Kraken trading is disabled. Set KRAKEN_ENABLE_TRADING=true to enable."
+            print(f"[kraken-trade] {msg}")
             self._push.send_update(
                 user_id=self._user_id,
-                new_trade="Kraken trading is disabled. Set KRAKEN_ENABLE_TRADING=true to enable."
+                new_trade=msg
             )
             return
         if not self._orders_left():
+            print(f"[kraken-trade] Skipped {pair}: Daily order limit reached")
             return
         
         # Check trader_state balance before placing trade
         current_balance = self._get_trader_state_balance()
         trade_amount = self._settings.max_notional_per_order_usd
         
+        print(f"[kraken-trade] User {self._user_id}: Balance=${current_balance:.2f}, Trade amount=${trade_amount:.2f}")
+        
         if current_balance < trade_amount:
+            msg = f"Insufficient balance for trade: ${current_balance:.2f} < ${trade_amount:.2f}"
+            print(f"[kraken-trade] {msg}")
             self._push.send_update(
                 user_id=self._user_id,
-                new_trade=f"Insufficient balance for trade: ${current_balance:.2f} < ${trade_amount:.2f}"
+                new_trade=msg
             )
             return
         
@@ -808,20 +817,26 @@ class UserBot:
             # Find the pair info
             pair_meta = asset_pairs.get(pair)
             if not pair_meta:
+                msg = f"Kraken pair {pair} not found"
+                print(f"[kraken-trade] {msg}")
                 self._push.send_update(
                     user_id=self._user_id,
-                    new_trade=f"Kraken pair {pair} not found"
+                    new_trade=msg
                 )
                 return
             
             # Get current price
             last_price, _ = _kraken_public_ticker(pair)
             if not last_price or last_price <= 0:
+                msg = f"Could not get price for {pair}"
+                print(f"[kraken-trade] {msg}")
                 self._push.send_update(
                     user_id=self._user_id,
-                    new_trade=f"Could not get price for {pair}"
+                    new_trade=msg
                 )
                 return
+            
+            print(f"[kraken-trade] {pair} current price: ${last_price:.2f}")
             
             # Calculate volume to buy with trade_amount USD
             lot_decimals = int(pair_meta.get("lot_decimals", 8))
@@ -830,11 +845,15 @@ class UserBot:
             # Check minimum order size
             order_min = float(pair_meta.get("ordermin", 0))
             if volume < order_min:
+                msg = f"Volume {volume} below minimum {order_min} for {pair}"
+                print(f"[kraken-trade] {msg}")
                 self._push.send_update(
                     user_id=self._user_id,
-                    new_trade=f"Volume {volume} below minimum {order_min} for {pair}"
+                    new_trade=msg
                 )
                 return
+            
+            print(f"[kraken-trade] Placing order: BUY {volume:.{lot_decimals}f} {pair} (~${trade_amount:.2f})")
             
             # Place market buy order
             order = _kraken_private(
@@ -852,17 +871,22 @@ class UserBot:
             
             # Deduct from trader_state balance
             new_balance = current_balance - trade_amount
+            print(f"[kraken-trade] Updating balance: ${current_balance:.2f} -> ${new_balance:.2f}")
             self._update_trader_state_balance(new_balance)
             
             txid = order.get("txid", ["unknown"])[0] if isinstance(order.get("txid"), list) else "unknown"
+            msg = f"✅ Placed Kraken BUY {pair} {volume:.{lot_decimals}f} (~${trade_amount:.2f}) txid:{txid} (New balance: ${new_balance:.2f})"
+            print(f"[kraken-trade] SUCCESS: {msg}")
             self._push.send_update(
                 user_id=self._user_id,
-                new_trade=f"Placed Kraken BUY {pair} {volume:.{lot_decimals}f} (~${trade_amount:.2f}) txid:{txid} (New balance: ${new_balance:.2f})",
+                new_trade=msg,
             )
         except Exception as e:
+            msg = f"Kraken order failed ({pair}): {e}"
+            print(f"[kraken-trade] ERROR: {msg}")
             self._push.send_update(
                 user_id=self._user_id,
-                new_trade=f"Kraken order failed ({pair}): {e}"
+                new_trade=msg
             )
 
     def _alpaca_trade_one_symbol(self, symbol: str) -> None:
@@ -1949,6 +1973,8 @@ async def deposit_from_chime(
     if amount_num <= 0:
         return JSONResponse({"error": "amount must be a positive number"}, status_code=400)
 
+    print(f"[deposit] User {user_id}: Depositing ${amount_num:.2f}")
+
     if not SETTINGS.supabase_url or not SETTINGS.supabase_service_role_key:
         return JSONResponse({"error": "Supabase not configured"}, status_code=500)
 
@@ -1969,8 +1995,12 @@ async def deposit_from_chime(
         rows = r.json() or []
         current_balance = float(rows[0]["balance"]) if rows else 0.0
         
+        print(f"[deposit] Current balance: ${current_balance:.2f}")
+        
         # Update balance by adding deposit amount
         new_balance = current_balance + amount_num
+        
+        print(f"[deposit] New balance: ${new_balance:.2f}")
         
         # Upsert trader_state with new balance
         upsert_data = {
@@ -1986,6 +2016,8 @@ async def deposit_from_chime(
         )
         r.raise_for_status()
         
+        print(f"[deposit] Updated trader_state balance in database")
+        
         # Create deposit record in withdrawal_requests table
         withdrawal_endpoint = f"{SETTINGS.supabase_url.rstrip('/')}/rest/v1/withdrawal_requests"
         deposit_record = {
@@ -1998,6 +2030,9 @@ async def deposit_from_chime(
         r = requests.post(withdrawal_endpoint, headers=headers, json=deposit_record, timeout=10)
         r.raise_for_status()
         
+        print(f"[deposit] Created deposit record in withdrawal_requests")
+        print(f"[deposit] ✅ SUCCESS: Deposited ${amount_num:.2f}, new balance ${new_balance:.2f}")
+        
         return JSONResponse({
             "success": True,
             "amount": amount_num,
@@ -2005,6 +2040,7 @@ async def deposit_from_chime(
             "message": f"Successfully deposited ${amount_num:.2f} from Chime to trading account",
         })
     except Exception as e:
+        print(f"[deposit] ❌ ERROR: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
