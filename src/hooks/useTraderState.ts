@@ -41,9 +41,9 @@ export function useTraderState(userId: string | null, options: UseTraderStateOpt
   const fetchKrakenBalance = useCallback(async (force = false) => {
     if (!userId) return;
     
-    // Rate limit: don't fetch more than once per 10 seconds unless forced
+    // Rate limit: don't fetch more than once per 15 seconds unless forced
     const now = Date.now();
-    if (!force && now - lastFetchTime < 10000) {
+    if (!force && now - lastFetchTime < 15000) {
       console.log('Skipping Kraken fetch - rate limited');
       return;
     }
@@ -56,7 +56,7 @@ export function useTraderState(userId: string | null, options: UseTraderStateOpt
     const timeout = setTimeout(() => {
       console.log('Kraken balance fetch timed out');
       setLoadingKraken(false);
-    }, 8000);
+    }, 10000);
     
     try {
       const { data, error } = await supabase.functions.invoke('kraken-withdraw', {
@@ -66,28 +66,33 @@ export function useTraderState(userId: string | null, options: UseTraderStateOpt
       
       if (error) {
         console.error('Kraken balance error:', error);
-        // Don't show error for rate limits, just use cached value
-        if (!error.message?.includes('Rate limit')) {
-          console.error('Kraken error:', error.message);
+        // On any error, try to get balance from state (cached in DB)
+        if (state?.balance !== undefined && state.balance > 0) {
+          setKrakenBalance(state.balance);
+          console.log('Using state balance after error:', state.balance);
         }
       } else if (data?.success) {
         setKrakenBalance(data.balance);
         setState(prev => prev ? { ...prev, balance: data.balance } : prev);
+        console.log('Kraken balance updated:', data.balance, data.cached ? '(cached)' : '(fresh)');
       } else if (data?.error) {
-        // Handle rate limit gracefully - keep existing balance
-        if (data.error.includes('Rate limit')) {
-          console.log('Kraken rate limited, using cached balance');
-        } else {
-          console.error('Kraken API error:', data.error);
+        console.error('Kraken API error:', data.error);
+        // Still try to use cached balance
+        if (state?.balance !== undefined) {
+          setKrakenBalance(state.balance);
         }
       }
     } catch (e) {
       console.error('Failed to fetch Kraken balance:', e);
       clearTimeout(timeout);
+      // Use cached balance on error
+      if (state?.balance !== undefined && state.balance > 0) {
+        setKrakenBalance(state.balance);
+      }
     } finally {
       setLoadingKraken(false);
     }
-  }, [userId, loadingKraken, lastFetchTime]);
+  }, [userId, loadingKraken, lastFetchTime, state?.balance]);
 
   useEffect(() => {
     if (!userId) {
@@ -106,7 +111,12 @@ export function useTraderState(userId: string | null, options: UseTraderStateOpt
       if (error) {
         console.error('Error fetching trader state:', error);
       } else if (data) {
-        setState(data as unknown as TraderState);
+        const traderData = data as unknown as TraderState;
+        setState(traderData);
+        // Also set kraken balance from DB state immediately
+        if (traderData.balance > 0) {
+          setKrakenBalance(traderData.balance);
+        }
       }
       setLoading(false);
     };
