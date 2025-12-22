@@ -135,45 +135,31 @@ export default function Withdraw() {
       
       {/* Balance Display */}
       <div style={{ 
-        display: 'grid', 
-        gridTemplateColumns: '1fr 1fr', 
-        gap: '16px', 
-        marginBottom: '24px' 
+        padding: '20px', 
+        marginBottom: '24px',
+        background: 'linear-gradient(135deg, hsl(280, 84%, 50%, 0.15), hsl(280, 84%, 50%, 0.05))',
+        borderRadius: '12px',
+        border: '2px solid hsl(280, 84%, 50%, 0.4)'
       }}>
-        <div style={{ 
-          padding: '16px', 
-          background: 'hsl(var(--muted))', 
-          borderRadius: '8px',
-          border: '1px solid hsl(var(--border))'
-        }}>
-          <p style={{ fontSize: '0.875rem', color: 'hsl(var(--muted-foreground))', marginBottom: '4px' }}>
-            Trading Balance
-          </p>
-          <p style={{ fontSize: '1.5rem', fontWeight: '600' }}>
-            {formatMoney(state?.balance || 0)}
-          </p>
-        </div>
-        <div style={{ 
-          padding: '16px', 
-          background: 'linear-gradient(135deg, hsl(280, 84%, 50%, 0.1), hsl(280, 84%, 50%, 0.05))', 
-          borderRadius: '8px',
-          border: '1px solid hsl(280, 84%, 50%, 0.3)'
-        }}>
-          <p style={{ fontSize: '0.875rem', color: 'hsl(280, 84%, 50%)', marginBottom: '4px' }}>
-            🏦 Kraken USD
-          </p>
-          <p style={{ fontSize: '1.5rem', fontWeight: '600' }}>
-            {loadingKrakenBalance ? 'Loading...' : formatMoney(krakenBalance || 0)}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+          <p style={{ fontSize: '0.875rem', color: 'hsl(280, 84%, 50%)', fontWeight: '600' }}>
+            🏦 Kraken USD Balance (Real Money)
           </p>
           <button
             className="plain-button"
             onClick={fetchKrakenBalance}
             disabled={loadingKrakenBalance}
-            style={{ marginTop: '8px', fontSize: '0.75rem', padding: '4px 8px' }}
+            style={{ fontSize: '0.75rem', padding: '4px 8px' }}
           >
-            Refresh
+            {loadingKrakenBalance ? 'Loading...' : '↻ Refresh'}
           </button>
         </div>
+        <p style={{ fontSize: '2rem', fontWeight: '700' }}>
+          {loadingKrakenBalance ? 'Loading...' : formatMoney(krakenBalance || 0)}
+        </p>
+        <p style={{ fontSize: '0.8rem', color: 'hsl(var(--muted-foreground))', marginTop: '8px' }}>
+          This is your real USD balance in Kraken. The trading bot uses this for all trades.
+        </p>
       </div>
 
       {/* How It Works */}

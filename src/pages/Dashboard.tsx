@@ -26,7 +26,7 @@ import {
 
 export default function Dashboard() {
   const { user, loading: authLoading, signOut, initializeTraderState } = useAuth();
-  const { state, trades, loading: stateLoading, toggleSwarm, toggleAutonomy } = useTraderState(user?.id || null);
+  const { state, trades, loading: stateLoading, toggleSwarm, toggleAutonomy, krakenBalance, loadingKraken, refreshKrakenBalance } = useTraderState(user?.id || null);
   const navigate = useNavigate();
   const [keyStatus, setKeyStatus] = useState<
     null | { ok: boolean; krakenOk?: boolean; plaidOk?: boolean; openaiOk?: boolean }
@@ -146,15 +146,24 @@ export default function Dashboard() {
 
       {/* Stats Grid */}
       <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
-        <Card>
+        <Card className="border-2 border-primary/30 bg-primary/5">
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+            <CardTitle className="text-sm font-medium text-primary flex items-center gap-2">
               <Wallet className="h-4 w-4" />
-              Balance
+              Kraken Balance (Real $)
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-2xl font-bold">{formatMoney(state?.balance || 0)}</p>
+            <p className="text-2xl font-bold">
+              {loadingKraken ? 'Loading...' : formatMoney(krakenBalance ?? 0)}
+            </p>
+            <button 
+              onClick={refreshKrakenBalance}
+              disabled={loadingKraken}
+              className="text-xs text-muted-foreground hover:text-foreground mt-1"
+            >
+              ↻ Refresh
+            </button>
           </CardContent>
         </Card>
 

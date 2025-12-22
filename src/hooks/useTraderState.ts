@@ -32,7 +32,28 @@ export function useTraderState(userId: string | null, options: UseTraderStateOpt
   const [state, setState] = useState<TraderState | null>(null);
   const [trades, setTrades] = useState<Trade[]>([]);
   const [loading, setLoading] = useState(true);
+  const [krakenBalance, setKrakenBalance] = useState<number | null>(null);
+  const [loadingKraken, setLoadingKraken] = useState(false);
   const { playNotificationSound } = useNotificationSound();
+
+  // Fetch real Kraken balance
+  const fetchKrakenBalance = useCallback(async () => {
+    if (!userId) return;
+    setLoadingKraken(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('kraken-withdraw', {
+        body: { action: 'get_balance' }
+      });
+      if (!error && data?.success) {
+        setKrakenBalance(data.balance);
+        // Update the state balance to match Kraken
+        setState(prev => prev ? { ...prev, balance: data.balance } : prev);
+      }
+    } catch (e) {
+      console.error('Failed to fetch Kraken balance:', e);
+    }
+    setLoadingKraken(false);
+  }, [userId]);
 
   useEffect(() => {
     if (!userId) {
@@ -74,6 +95,7 @@ export function useTraderState(userId: string | null, options: UseTraderStateOpt
 
     fetchState();
     fetchTrades();
+    fetchKrakenBalance(); // Also fetch real Kraken balance
 
     // Subscribe to realtime updates for trader_state
     const stateChannel = supabase
@@ -125,6 +147,9 @@ export function useTraderState(userId: string | null, options: UseTraderStateOpt
                 duration: 5000,
               });
             }
+            
+            // Refresh Kraken balance after a trade
+            fetchKrakenBalance();
           }
         }
       )
@@ -134,7 +159,7 @@ export function useTraderState(userId: string | null, options: UseTraderStateOpt
       supabase.removeChannel(stateChannel);
       supabase.removeChannel(tradesChannel);
     };
-  }, [userId, options.showNotifications, playNotificationSound]);
+  }, [userId, options.showNotifications, playNotificationSound, fetchKrakenBalance]);
 
   const toggleSwarm = async () => {
     if (!userId || !state) return;
@@ -168,5 +193,14 @@ export function useTraderState(userId: string | null, options: UseTraderStateOpt
     }
   };
 
-  return { state, trades, loading, toggleSwarm, toggleAutonomy };
+  return { 
+    state, 
+    trades, 
+    loading, 
+    toggleSwarm, 
+    toggleAutonomy,
+    krakenBalance,
+    loadingKraken,
+    refreshKrakenBalance: fetchKrakenBalance
+  };
 }
