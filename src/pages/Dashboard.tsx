@@ -210,7 +210,7 @@ export default function Dashboard() {
               {loadingKraken ? 'Loading...' : formatMoney(krakenBalance ?? 0)}
             </p>
             <button 
-              onClick={refreshKrakenBalance}
+              onClick={() => refreshKrakenBalance(true)}
               disabled={loadingKraken}
               className="text-xs text-muted-foreground hover:text-foreground mt-1"
             >
