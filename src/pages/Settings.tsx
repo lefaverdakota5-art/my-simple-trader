@@ -597,6 +597,13 @@ export default function Settings() {
           Stored on your device. Requires KRAKEN_ENABLE_WITHDRAWALS=true on backend.
         </p>
       </div>
+
+      {/* App Version */}
+      <div style={{ marginTop: "32px", paddingTop: "16px", borderTop: "1px solid hsl(var(--border))" }}>
+        <p style={{ color: "hsl(var(--muted-foreground))", fontSize: "0.75rem", textAlign: "center" }}>
+          AI Trader v1.2 • Build {import.meta.env.MODE === 'production' ? 'Release' : 'Dev'}
+        </p>
+      </div>
     </div>
   );
 }
