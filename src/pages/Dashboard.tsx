@@ -94,9 +94,16 @@ export default function Dashboard() {
   };
 
   const handleTestRealTrade = async () => {
-    if (!user) return;
+    if (!user || tradingLoading) return;
     
     setTradingLoading(true);
+    
+    // Safety timeout to prevent stuck loading
+    const timeout = setTimeout(() => {
+      setTradingLoading(false);
+      toast.error("Trade request timed out");
+    }, 30000);
+    
     try {
       // Buy XRP with $2 (meets minimum order requirement)
       const { data, error } = await supabase.functions.invoke("kraken-withdraw", {
@@ -107,25 +114,28 @@ export default function Dashboard() {
         },
       });
       
+      clearTimeout(timeout);
+      
       if (error) {
         toast.error("Trade failed: " + error.message);
+        setTradingLoading(false);
         return;
       }
       
       if (data?.error) {
         toast.error(data.error);
+        setTradingLoading(false);
         return;
       }
       
-      const tradeResult = data;
-      
-      toast.success(tradeResult.message || "Trade executed successfully!");
-      console.log("Trade result:", tradeResult);
+      toast.success(data.message || "Trade executed successfully!");
+      console.log("Trade result:", data);
       
       // Refresh Kraken balance after trade
       refreshKrakenBalance();
       
     } catch (err) {
+      clearTimeout(timeout);
       toast.error("Trade failed: " + (err instanceof Error ? err.message : "Unknown error"));
     } finally {
       setTradingLoading(false);
