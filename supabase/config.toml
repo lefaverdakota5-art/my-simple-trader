@@ -8,3 +8,6 @@ verify_jwt = false
 
 [functions.bot-tick]
 verify_jwt = false
+
+[functions.kraken-withdraw]
+verify_jwt = false

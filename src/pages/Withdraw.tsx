@@ -4,7 +4,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useTraderState } from '@/hooks/useTraderState';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/hooks/use-toast';
-import { getBotApiBaseUrl, getKrakenWithdrawAsset, getKrakenWithdrawKeyUsd, getSupabaseAccessToken } from "@/lib/botApi";
+import { getBotApiBaseUrl, getKrakenWithdrawAsset, getKrakenWithdrawKeyUsd, getSupabaseAccessToken, setKrakenWithdrawKeyUsd } from "@/lib/botApi";
 
 interface ChimeDetails {
   chime_routing_number: string | null;
@@ -31,10 +31,12 @@ export default function Withdraw() {
   const [mode, setMode] = useState<'deposit' | 'withdraw'>('deposit');
   const [submitting, setSubmitting] = useState(false);
   const [withdrawals, setWithdrawals] = useState<WithdrawalRequest[]>([]);
-  const [krakenKey, setKrakenKey] = useState("");
+  const [krakenWithdrawKey, setKrakenWithdrawKey] = useState("");
   const [krakenAsset, setKrakenAsset] = useState("ZUSD");
   const [chimeDetails, setChimeDetails] = useState<ChimeDetails | null>(null);
   const [loadingChime, setLoadingChime] = useState(true);
+  const [krakenBalance, setKrakenBalance] = useState<number | null>(null);
+  const [loadingKrakenBalance, setLoadingKrakenBalance] = useState(false);
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -75,9 +77,34 @@ export default function Withdraw() {
   }, [user]);
 
   useEffect(() => {
-    setKrakenKey(getKrakenWithdrawKeyUsd());
+    setKrakenWithdrawKey(getKrakenWithdrawKeyUsd());
     setKrakenAsset(getKrakenWithdrawAsset());
   }, []);
+
+  // Fetch Kraken balance
+  const fetchKrakenBalance = async () => {
+    if (!user) return;
+    setLoadingKrakenBalance(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('kraken-withdraw', {
+        body: { action: 'get_balance' }
+      });
+      if (error) {
+        console.error('Kraken balance error:', error);
+      } else if (data?.success) {
+        setKrakenBalance(data.balance);
+      }
+    } catch (e) {
+      console.error('Failed to fetch Kraken balance:', e);
+    }
+    setLoadingKrakenBalance(false);
+  };
+
+  useEffect(() => {
+    if (user) {
+      fetchKrakenBalance();
+    }
+  }, [user]);
 
   const getAccessToken = async () => getSupabaseAccessToken();
 
@@ -173,8 +200,8 @@ export default function Withdraw() {
     setSubmitting(false);
   };
 
-  // Chime Direct withdrawal - creates a withdrawal request with Chime details
-  const handleChimeDirectWithdraw = async () => {
+  // Real money withdrawal via Kraken to Chime
+  const handleWithdrawToChime = async () => {
     if (!user) return;
     
     const numAmount = parseFloat(amount);
@@ -197,11 +224,21 @@ export default function Withdraw() {
       return;
     }
 
-    // Check against trading balance for withdrawals
-    if (numAmount > (state?.balance || 0)) {
+    if (!krakenWithdrawKey.trim()) {
       toast({
-        title: 'Error',
-        description: `Insufficient trading balance. Available: $${(state?.balance || 0).toFixed(2)}`,
+        title: 'Missing Kraken Withdrawal Key',
+        description: 'Please add your Chime bank as a withdrawal address in Kraken, then enter the key name in Settings.',
+        variant: 'destructive',
+      });
+      navigate('/settings');
+      return;
+    }
+
+    // Check against Kraken balance for real withdrawals
+    if (krakenBalance !== null && numAmount > krakenBalance) {
+      toast({
+        title: 'Insufficient Kraken Balance',
+        description: `Your Kraken USD balance is $${krakenBalance.toFixed(2)}. Please fund Kraken first.`,
         variant: 'destructive',
       });
       return;
@@ -209,38 +246,47 @@ export default function Withdraw() {
 
     setSubmitting(true);
 
-    const { error } = await supabase
-      .from('withdrawal_requests')
-      .insert({
-        user_id: user.id,
-        amount: numAmount,
-        status: 'pending',
-        withdraw_type: 'chime_direct',
-        bank_name: chimeDetails.chime_account_name || 'Chime',
+    try {
+      const { data, error } = await supabase.functions.invoke('kraken-withdraw', {
+        body: { 
+          action: 'withdraw_to_chime',
+          amount: numAmount,
+          withdraw_key: krakenWithdrawKey,
+          asset: krakenAsset
+        }
       });
 
-    if (error) {
+      if (error || !data?.success) {
+        toast({
+          title: 'Withdrawal Failed',
+          description: data?.error || error?.message || 'Failed to initiate withdrawal',
+          variant: 'destructive',
+        });
+      } else {
+        toast({
+          title: '✅ Withdrawal Initiated!',
+          description: data.message || `$${numAmount.toFixed(2)} will be sent to your Chime account`,
+        });
+        setAmount('');
+        
+        // Refresh Kraken balance and withdrawal list
+        fetchKrakenBalance();
+        const { data: withdrawalData } = await supabase
+          .from('withdrawal_requests')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false })
+          .limit(10);
+        
+        if (withdrawalData) setWithdrawals(withdrawalData);
+      }
+    } catch (error) {
+      console.error('Withdrawal error:', error);
       toast({
         title: 'Error',
-        description: error.message,
+        description: 'Failed to process withdrawal request',
         variant: 'destructive',
       });
-    } else {
-      toast({
-        title: '✅ Withdrawal Submitted!',
-        description: `$${numAmount.toFixed(2)} will be sent to your Chime account (${chimeDetails.chime_account_name || 'Chime'})`,
-      });
-      setAmount('');
-      
-      // Refresh withdrawals list
-      const { data } = await supabase
-        .from('withdrawal_requests')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false })
-        .limit(10);
-      
-      if (data) setWithdrawals(data);
     }
 
     setSubmitting(false);
@@ -275,43 +321,10 @@ export default function Withdraw() {
     }
   };
 
+  // Legacy Kraken withdraw - now uses the new edge function
   const handleWithdrawViaKraken = async () => {
-    if (!botApiBase) {
-      toast({
-        title: "Backend not configured",
-        description: "Set Bot Backend URL in Settings.",
-        variant: "destructive",
-      });
-      return;
-    }
-    const numAmount = parseFloat(amount);
-    if (isNaN(numAmount) || numAmount <= 0) {
-      toast({ title: "Error", description: "Enter a valid amount", variant: "destructive" });
-      return;
-    }
-    if (!krakenKey.trim()) {
-      toast({ title: "Missing Kraken withdraw key", description: "Set it in Settings.", variant: "destructive" });
-      return;
-    }
-    const token = await getAccessToken();
-    if (!token) return;
-
-    setSubmitting(true);
-    try {
-      const r = await fetch(`${botApiBase}/kraken/withdraw_fiat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ amount: numAmount, asset: krakenAsset, key: krakenKey }),
-      });
-      const data = await r.json();
-      if (!r.ok) {
-        toast({ title: "Kraken withdraw failed", description: data?.error || "Unknown error", variant: "destructive" });
-      } else {
-        toast({ title: "Kraken withdraw submitted", description: "Check Kraken withdraw status." });
-      }
-    } finally {
-      setSubmitting(false);
-    }
+    // Redirect to the new withdraw flow
+    await handleWithdrawToChime();
   };
 
   if (authLoading || stateLoading) {
@@ -457,13 +470,18 @@ export default function Withdraw() {
                 style={{ fontSize: '1.2rem', padding: '12px' }}
               />
               <p style={{ fontSize: '0.75rem', color: 'hsl(var(--muted-foreground))', marginTop: '4px' }}>
-                {mode === 'withdraw' && `Available in Trading: ${formatMoney(state?.balance || 0)}`}
+                {mode === 'withdraw' && (
+                  <>
+                    Kraken USD Balance: {loadingKrakenBalance ? 'Loading...' : formatMoney(krakenBalance || 0)}
+                    {!krakenWithdrawKey && <span style={{ color: 'hsl(0, 84%, 50%)', marginLeft: '8px' }}>⚠️ Set Kraken withdrawal key in Settings</span>}
+                  </>
+                )}
               </p>
             </div>
             
             <button
               className="plain-button"
-              onClick={mode === 'deposit' ? handleChimeDeposit : handleChimeDirectWithdraw}
+              onClick={mode === 'deposit' ? handleChimeDeposit : handleWithdrawToChime}
               disabled={submitting || !amount}
               style={{ 
                 fontWeight: '600', 
