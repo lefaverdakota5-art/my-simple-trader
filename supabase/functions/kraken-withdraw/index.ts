@@ -226,8 +226,9 @@ serve(async (req) => {
     if (action === "get_withdraw_info") {
       const asset = String(body?.asset || "ZUSD");
       const withdrawKey = String(body?.withdraw_key || "").trim();
+      const amountStr = String(body?.amount || "1");
 
-      const params: Record<string, string> = { asset };
+      const params: Record<string, string> = { asset, amount: amountStr };
       if (withdrawKey) params.key = withdrawKey;
 
       const result = await krakenRequest("/0/private/WithdrawInfo", krakenKey, krakenSecret, params);
@@ -237,6 +238,53 @@ serve(async (req) => {
       }
 
       return jsonResponse({ success: true, info: result.result });
+    }
+
+    // Get available withdrawal methods for an asset
+    if (action === "get_withdraw_methods") {
+      const asset = String(body?.asset || "USD");
+      
+      const result = await krakenRequest("/0/private/WithdrawMethods", krakenKey, krakenSecret, { asset });
+      
+      console.log("WithdrawMethods result:", JSON.stringify(result));
+      
+      if (result.error && result.error.length > 0) {
+        return jsonResponse({ error: result.error.join(", ") }, 400);
+      }
+
+      return jsonResponse({ success: true, methods: result.result });
+    }
+
+    // Get saved withdrawal addresses
+    if (action === "get_withdraw_addresses") {
+      const asset = String(body?.asset || "USD");
+      const method = String(body?.method || "");
+      
+      const params: Record<string, string> = { asset };
+      if (method) params.method = method;
+      
+      const result = await krakenRequest("/0/private/WithdrawAddresses", krakenKey, krakenSecret, params);
+      
+      console.log("WithdrawAddresses result:", JSON.stringify(result));
+      
+      if (result.error && result.error.length > 0) {
+        return jsonResponse({ error: result.error.join(", ") }, 400);
+      }
+
+      return jsonResponse({ success: true, addresses: result.result });
+    }
+
+    // Get withdrawal status
+    if (action === "get_withdraw_status") {
+      const asset = String(body?.asset || "USD");
+      
+      const result = await krakenRequest("/0/private/WithdrawStatus", krakenKey, krakenSecret, { asset });
+      
+      if (result.error && result.error.length > 0) {
+        return jsonResponse({ error: result.error.join(", ") }, 400);
+      }
+
+      return jsonResponse({ success: true, withdrawals: result.result });
     }
 
     return jsonResponse({ error: "Unknown action" }, 400);
