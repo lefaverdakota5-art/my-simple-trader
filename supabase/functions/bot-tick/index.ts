@@ -133,21 +133,28 @@ async function krakenOHLC(pair: string): Promise<{ high: number; low: number; vo
 }
 
 function council(pct: number, ordersLeft: boolean) {
-  const ai1 = pct > 0.1;
-  const ai2 = pct > 0.05;
-  const ai3 = pct > 0.0;
-  const ai4 = Math.abs(pct) <= 2.0;
+  // Smart basic council - approves momentum AND dip-buying opportunities
+  // For dips: more negative = better buy opportunity (contrarian strategy)
+  const isDip = pct < -3.0; // Significant dip
+  const isMomentum = pct > 0.05; // Positive momentum
+  
+  const ai1 = isMomentum || isDip; // Momentum OR dip opportunity
+  const ai2 = pct > -20.0; // Not a complete crash (>20% drop is too risky)
+  const ai3 = pct !== 0; // Has some movement
+  const ai4 = Math.abs(pct) <= 20.0 || isDip; // Volatility OK, or it's a dip buy
   const ai5 = ordersLeft;
   const votes = [ai1, ai2, ai3, ai4, ai5];
   const yes = votes.filter(Boolean).length;
+  
+  const signal = isDip ? "DIP-BUY" : (isMomentum ? "MOMENTUM" : "NEUTRAL");
   const reasons = [
-    `${ai1 ? "YES" : "NO"}: Momentum Analyst • momentum>0.10% (${pct.toFixed(2)}%)`,
-    `${ai2 ? "YES" : "NO"}: Risk Manager • momentum>0.05% (${pct.toFixed(2)}%)`,
-    `${ai3 ? "YES" : "NO"}: Technical Analyst • momentum>0.00% (${pct.toFixed(2)}%)`,
-    `${ai4 ? "YES" : "NO"}: Volatility Guard • volatility<=2.00% (${pct.toFixed(2)}%)`,
+    `${ai1 ? "YES" : "NO"}: Signal Detector • ${signal} (${pct.toFixed(2)}%)`,
+    `${ai2 ? "YES" : "NO"}: Crash Guard • not crashing >-20% (${pct.toFixed(2)}%)`,
+    `${ai3 ? "YES" : "NO"}: Activity Checker • has price movement`,
+    `${ai4 ? "YES" : "NO"}: Volatility/Dip Guard • OK for trading`,
     `${ai5 ? "YES" : "NO"}: Portfolio Guardian • daily order limit`,
   ];
-  return { votes: `${yes}/5`, reasons, approved: yes >= 4 };
+  return { votes: `${yes}/5`, reasons, approved: yes >= 3 }; // 3/5 = 60% approval for basic council
 }
 
 // Generic AI vote helper - uses Lovable AI (no API key needed)
@@ -2502,10 +2509,18 @@ serve(async (req) => {
         { result: effectAiResult, name: "⚡ Effect AI (Special)" },
       ];
 
+      // Count how many AI votes we actually got (vs rate limited)
+      let aiVotesReceived = 0;
+      let aiYesVotes = 0;
+      
       for (const { result, name } of aiVotes) {
         if (result) {
           totalMembers++;
-          if (result.vote) yesVotes++;
+          aiVotesReceived++;
+          if (result.vote) {
+            yesVotes++;
+            aiYesVotes++;
+          }
           c.reasons.push(`${result.vote ? "YES" : "NO"}: ${name} • ${result.reason}`);
         }
       }
@@ -2514,19 +2529,42 @@ serve(async (req) => {
       const lovableVote = await lovableAiStrategistVote({ context: aiContext });
       if (lovableVote) {
         totalMembers++;
-        if (lovableVote.vote) yesVotes++;
+        aiVotesReceived++;
+        if (lovableVote.vote) {
+          yesVotes++;
+          aiYesVotes++;
+        }
         c.reasons.push(`${lovableVote.vote ? "YES" : "NO"}: AI Strategist • ${lovableVote.reason}`);
       }
 
-      // Recalculate approval with all members
-      // CONSERVATIVE: Require 3/4 (75%) council approval before trading
-      // This ensures high-conviction trades only
+      // SMART THRESHOLD SYSTEM:
+      // - If AI votes are available (>3 responses), use 60% threshold
+      // - If AI is rate-limited (<3 responses), use BASIC COUNCIL ONLY with 3/5 threshold
+      // - Penny stocks and meme coins get LOWER threshold (50%) for volatility plays
       
-      const thresholdPercent = 0.75; // 75% = 3/4 majority required
-      const thresholdReason = "3/4-majority";
+      const isPennyOrMeme = assetType === "stock" && (
+        bestPair.symbol.length <= 4 || // Short tickers often penny stocks
+        Math.abs(pct) > 5 // High volatility
+      );
+      
+      let thresholdPercent: number;
+      let thresholdReason: string;
+      
+      if (aiVotesReceived >= 3) {
+        // AI council active - use 60% threshold
+        thresholdPercent = isPennyOrMeme ? 0.50 : 0.60;
+        thresholdReason = isPennyOrMeme ? "penny/meme-mode" : "ai-council-active";
+      } else {
+        // AI rate limited - FALLBACK to basic council
+        // Basic council already has 5 votes, use 3/5 = 60% for approval
+        thresholdPercent = isPennyOrMeme ? 0.40 : 0.60;
+        thresholdReason = "fallback-basic-council";
+        // In fallback mode, the basic council votes count more
+        c.reasons.push("⚠️ FALLBACK MODE: AI rate-limited, using basic council votes");
+      }
       
       const threshold = Math.max(Math.ceil(totalMembers * thresholdPercent), 3); // Minimum 3 votes needed
-      console.log(`[bot-tick] CONSERVATIVE 3/4 Threshold: ${(thresholdPercent * 100).toFixed(0)}% (${thresholdReason}) = ${threshold}/${totalMembers} votes needed, got ${yesVotes}`);
+      console.log(`[bot-tick] Threshold: ${(thresholdPercent * 100).toFixed(0)}% (${thresholdReason}) = ${threshold}/${totalMembers} votes needed, got ${yesVotes}, AI responses: ${aiVotesReceived}`);
       
       c = {
         votes: `${yesVotes}/${totalMembers}`,
