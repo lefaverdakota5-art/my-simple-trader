@@ -98,43 +98,26 @@ export default function Dashboard() {
     
     setTradingLoading(true);
     try {
-      // Try XRP first (lower minimum), then fall back to others
-      const pairs = ["XXRPZUSD", "ADAUSD", "XDGUSD"];
-      let tradeResult = null;
-      let lastError = "";
+      // Buy XRP with $2 (meets minimum order requirement)
+      const { data, error } = await supabase.functions.invoke("kraken-withdraw", {
+        body: { 
+          action: "buy_crypto",
+          pair: "XXRPZUSD",  // XRP/USD - lower minimum
+          amount_usd: 2.0    // $2 meets minimum requirement
+        },
+      });
       
-      for (const pair of pairs) {
-        const { data, error } = await supabase.functions.invoke("kraken-withdraw", {
-          body: { 
-            action: "buy_crypto",
-            pair: pair,
-            amount_usd: 1.0
-          },
-        });
-        
-        if (error) {
-          lastError = error.message;
-          continue;
-        }
-        
-        if (data?.error) {
-          lastError = data.error;
-          // If it's a minimum order error, try next pair
-          if (data.error.includes("below minimum")) {
-            continue;
-          }
-          toast.error(data.error);
-          return;
-        }
-        
-        tradeResult = data;
-        break;
-      }
-      
-      if (!tradeResult) {
-        toast.error(lastError || "Could not execute trade - minimum order requirements not met with $1");
+      if (error) {
+        toast.error("Trade failed: " + error.message);
         return;
       }
+      
+      if (data?.error) {
+        toast.error(data.error);
+        return;
+      }
+      
+      const tradeResult = data;
       
       toast.success(tradeResult.message || "Trade executed successfully!");
       console.log("Trade result:", tradeResult);
