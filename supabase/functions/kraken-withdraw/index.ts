@@ -109,7 +109,7 @@ serve(async (req) => {
     // Get user's Kraken API keys and withdrawal settings
     const { data: keysData, error: keysError } = await supabaseAdmin
       .from("user_exchange_keys")
-      .select("kraken_key, kraken_secret, chime_account_name, kraken_withdraw_key")
+      .select("kraken_key, kraken_secret, kraken_withdraw_key")
       .eq("user_id", userId)
       .maybeSingle();
 
@@ -140,7 +140,7 @@ serve(async (req) => {
       });
     }
 
-    if (action === "withdraw_to_chime") {
+    if (action === "withdraw_to_chime" || action === "withdraw_to_bank") {
       const amount = parseFloat(body?.amount);
       // Use withdraw_key from request body, fall back to saved key in database
       const withdrawKey = String(body?.withdraw_key || savedWithdrawKey || "").trim();
@@ -152,7 +152,7 @@ serve(async (req) => {
 
       if (!withdrawKey) {
         return jsonResponse({ 
-          error: "Missing Kraken withdrawal key. Please add your Chime bank as a withdrawal address in Kraken, then enter the key name in Settings." 
+          error: "Missing Kraken withdrawal key. Please add your bank as a withdrawal address in Kraken, then enter the key name in Settings." 
         }, 400);
       }
 
@@ -194,8 +194,8 @@ serve(async (req) => {
           user_id: userId,
           amount: amount,
           status: "processing",
-          withdraw_type: "kraken_to_chime",
-          bank_name: keysData.chime_account_name || "Chime",
+          withdraw_type: "kraken_to_bank",
+          bank_name: withdrawKey,
         });
 
       if (insertError) {
@@ -221,7 +221,7 @@ serve(async (req) => {
 
       return jsonResponse({ 
         success: true, 
-        message: `Withdrawal of $${amount.toFixed(2)} initiated successfully. Funds will arrive in your Chime account in 1-3 business days.`,
+        message: `Withdrawal of $${amount.toFixed(2)} initiated successfully. Funds will arrive in your bank account in 1-3 business days.`,
         refid: refid,
         remainingBalance: usdBalance - amount
       });
