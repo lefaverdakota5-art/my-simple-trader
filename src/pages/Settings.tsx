@@ -42,12 +42,7 @@ export default function Settings() {
   const [trailingStopPercent, setTrailingStopPercent] = useState(3);
   const [trailingStopEnabled, setTrailingStopEnabled] = useState(false);
   const [maxPositionPercent, setMaxPositionPercent] = useState(10);
-  // Chime Direct
-  const [chimeRoutingNumber, setChimeRoutingNumber] = useState("");
-  const [chimeAccountNumber, setChimeAccountNumber] = useState("");
-  const [chimeAccountName, setChimeAccountName] = useState("Chime Spending");
-  const [savingChime, setSavingChime] = useState(false);
-  const [chimeConnected, setChimeConnected] = useState(false);
+  // Removed Chime Direct - using Kraken directly for deposits/withdrawals
   const [submitting, setSubmitting] = useState(false);
   const [submittingTpSl, setSubmittingTpSl] = useState(false);
   const [testingPermissions, setTestingPermissions] = useState(false);
@@ -102,27 +97,15 @@ export default function Settings() {
           if (data.maxPositionPercent != null) setMaxPositionPercent(data.maxPositionPercent);
         }
         
-        // Load Chime details and Kraken withdrawal key from database
+        // Load Kraken withdrawal key from database
         const { data: keysData } = await supabase
           .from("user_exchange_keys")
-          .select("chime_routing_number, chime_account_number, chime_account_name, kraken_withdraw_key")
+          .select("kraken_withdraw_key")
           .eq("user_id", user.id)
           .maybeSingle();
         
-        if (keysData) {
-          if (keysData.chime_routing_number) {
-            setChimeRoutingNumber(keysData.chime_routing_number);
-            setChimeConnected(true);
-          }
-          if (keysData.chime_account_number) {
-            setChimeAccountNumber(keysData.chime_account_number);
-          }
-          if (keysData.chime_account_name) {
-            setChimeAccountName(keysData.chime_account_name);
-          }
-          if (keysData.kraken_withdraw_key) {
-            setKrakenWithdrawKey(keysData.kraken_withdraw_key);
-          }
+        if (keysData?.kraken_withdraw_key) {
+          setKrakenWithdrawKey(keysData.kraken_withdraw_key);
         }
       } catch (e) {
         console.error("Failed to load status:", e);
@@ -147,107 +130,67 @@ export default function Settings() {
         Settings
       </h1>
 
-      {/* Chime Direct - Primary Banking Method */}
+      {/* Kraken Funding Info */}
       <div style={{ 
         marginBottom: "24px",
         padding: "20px",
-        background: "linear-gradient(135deg, hsl(160, 84%, 39%, 0.15), hsl(160, 84%, 39%, 0.05))",
+        background: "linear-gradient(135deg, hsl(280, 84%, 50%, 0.15), hsl(280, 84%, 50%, 0.05))",
         borderRadius: "12px",
-        border: "2px solid hsl(160, 84%, 39%, 0.4)"
+        border: "2px solid hsl(280, 84%, 50%, 0.4)"
       }}>
-        <h2 className="medium-text" style={{ fontWeight: 600, marginBottom: "8px", color: "hsl(160, 84%, 39%)" }}>
-          💳 Chime Banking
+        <h2 className="medium-text" style={{ fontWeight: 600, marginBottom: "8px", color: "hsl(280, 84%, 50%)" }}>
+          🏦 Fund Your Trading Account
         </h2>
         <p style={{ color: "hsl(var(--muted-foreground))", fontSize: "0.9rem", marginBottom: "16px" }}>
-          Connect your Chime account for easy deposits and withdrawals. No complex setup required!
-          {chimeConnected && <span style={{ color: "hsl(142, 76%, 36%)", marginLeft: "8px", fontWeight: 600 }}>✓ Connected</span>}
+          Deposit and withdraw funds directly through Kraken. This gives you full control over your money.
         </p>
         
-        <div style={{ marginBottom: "12px" }}>
-          <label style={{ display: "block", marginBottom: "4px", fontWeight: 500 }}>
-            Account Name
-          </label>
-          <input
-            className="plain-input"
-            value={chimeAccountName}
-            onChange={(e) => setChimeAccountName(e.target.value)}
-            placeholder="Chime Spending"
-          />
+        <div style={{ 
+          padding: "16px", 
+          background: "hsl(var(--muted) / 0.5)",
+          borderRadius: "8px",
+          marginBottom: "12px"
+        }}>
+          <p style={{ fontWeight: 600, marginBottom: "8px" }}>💰 To Deposit:</p>
+          <ol style={{ margin: 0, paddingLeft: "20px", color: "hsl(var(--muted-foreground))", fontSize: "0.9rem" }}>
+            <li>Open the Kraken app or website</li>
+            <li>Go to Portfolio → Deposit → USD</li>
+            <li>Choose your deposit method (bank transfer, etc.)</li>
+            <li>Once funded, the app will use your Kraken balance for trading</li>
+          </ol>
         </div>
         
-        <div style={{ display: "flex", gap: "12px", flexWrap: "wrap", marginBottom: "12px" }}>
-          <div style={{ flex: "1", minWidth: "140px" }}>
-            <label style={{ display: "block", marginBottom: "4px", fontWeight: 500 }}>
-              Routing Number
-            </label>
-            <input
-              className="plain-input"
-              type="text"
-              inputMode="numeric"
-              pattern="[0-9]*"
-              maxLength={9}
-              value={chimeRoutingNumber}
-              onChange={(e) => setChimeRoutingNumber(e.target.value.replace(/\D/g, ""))}
-              placeholder="9 digits"
-            />
-          </div>
-          <div style={{ flex: "1", minWidth: "140px" }}>
-            <label style={{ display: "block", marginBottom: "4px", fontWeight: 500 }}>
-              Account Number
-            </label>
-            <input
-              className="plain-input"
-              type="password"
-              inputMode="numeric"
-              value={chimeAccountNumber}
-              onChange={(e) => setChimeAccountNumber(e.target.value.replace(/\D/g, ""))}
-              placeholder="Your account number"
-            />
-          </div>
+        <div style={{ 
+          padding: "16px", 
+          background: "hsl(var(--muted) / 0.5)",
+          borderRadius: "8px"
+        }}>
+          <p style={{ fontWeight: 600, marginBottom: "8px" }}>💸 To Withdraw:</p>
+          <ol style={{ margin: 0, paddingLeft: "20px", color: "hsl(var(--muted-foreground))", fontSize: "0.9rem" }}>
+            <li>Open the Kraken app or website</li>
+            <li>Go to Portfolio → Withdraw → USD</li>
+            <li>Add your bank account as a withdrawal destination</li>
+            <li>Withdraw funds to your bank (1-3 business days)</li>
+          </ol>
         </div>
         
-        <button
+        <a 
+          href="https://www.kraken.com/sign-in" 
+          target="_blank" 
+          rel="noopener noreferrer"
           className="plain-button"
-          disabled={savingChime || !chimeRoutingNumber || !chimeAccountNumber}
-          onClick={async () => {
-            if (chimeRoutingNumber.length !== 9) {
-              toast({ title: "Invalid Routing Number", description: "Routing number must be 9 digits", variant: "destructive" });
-              return;
-            }
-            if (chimeAccountNumber.length < 4) {
-              toast({ title: "Invalid Account Number", description: "Please enter a valid account number", variant: "destructive" });
-              return;
-            }
-            
-            setSavingChime(true);
-            try {
-              const { error } = await supabase
-                .from("user_exchange_keys")
-                .upsert({
-                  user_id: user!.id,
-                  chime_routing_number: chimeRoutingNumber,
-                  chime_account_number: chimeAccountNumber,
-                  chime_account_name: chimeAccountName || "Chime Spending",
-                }, { onConflict: "user_id" });
-              
-              if (error) {
-                toast({ title: "Failed", description: error.message, variant: "destructive" });
-              } else {
-                setChimeConnected(true);
-                toast({ title: "✅ Chime Connected!", description: "You can now deposit and withdraw from your Chime account." });
-              }
-            } finally {
-              setSavingChime(false);
-            }
+          style={{ 
+            display: "inline-block",
+            fontWeight: 600, 
+            background: "hsl(280, 84%, 50%)", 
+            color: "white", 
+            padding: "14px 24px",
+            marginTop: "16px",
+            textDecoration: "none"
           }}
-          style={{ fontWeight: 600, background: "hsl(160, 84%, 39%)", color: "white", padding: "14px 24px" }}
         >
-          {savingChime ? "Saving..." : chimeConnected ? "Update Chime Details" : "Connect Chime Account"}
-        </button>
-        
-        <p style={{ color: "hsl(var(--muted-foreground))", fontSize: "0.8rem", marginTop: "12px" }}>
-          🔒 Your bank details are encrypted and stored securely. Find your routing/account numbers in the Chime app under "Move Money" → "Set up direct deposit".
-        </p>
+          Open Kraken →
+        </a>
       </div>
 
       {/* AI Council Info */}
@@ -652,12 +595,12 @@ export default function Settings() {
 
       <div style={{ marginTop: "24px" }}>
         <h2 className="medium-text" style={{ fontWeight: 600, marginBottom: "12px" }}>
-          Kraken Withdrawal Setup
+          Kraken Withdrawal Setup (Optional)
         </h2>
         <p style={{ color: "hsl(var(--muted-foreground))", fontSize: "0.9rem", marginBottom: "16px" }}>
-          To withdraw USD from Kraken to your bank:
-          <br />1. Go to Kraken → Funding → Withdraw → USD
-          <br />2. Add your Chime bank as a withdrawal address
+          If you want to withdraw directly from this app (instead of using Kraken's website):
+          <br />1. Go to Kraken → Portfolio → Withdraw → USD
+          <br />2. Add your bank as a withdrawal address
           <br />3. Copy the "key name" you created and paste it below
         </p>
         <div style={{ marginBottom: "12px" }}>
@@ -668,7 +611,7 @@ export default function Settings() {
             className="plain-input"
             value={krakenWithdrawKey}
             onChange={(e) => setKrakenWithdrawKey(e.target.value)}
-            placeholder="e.g., Chime_Bank or My_Chime"
+            placeholder="e.g., My_Bank or Chase_Checking"
           />
           <p style={{ color: "hsl(var(--muted-foreground))", fontSize: "0.8rem", marginTop: "4px" }}>
             This is the name you gave your bank when adding it in Kraken
@@ -786,7 +729,7 @@ export default function Settings() {
             
             {permissionResult.savedAddresses?.length === 0 && permissionResult.hasWithdrawPermission && (
               <p style={{ fontSize: "0.85rem", color: "hsl(var(--warning))", marginTop: "8px" }}>
-                ⚠️ No bank accounts saved in Kraken. Go to Kraken → Portfolio → Withdraw → USD to add your Chime bank.
+                ⚠️ No bank accounts saved in Kraken. Go to Kraken → Portfolio → Withdraw → USD to add your bank.
               </p>
             )}
             

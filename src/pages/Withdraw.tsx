@@ -4,13 +4,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useTraderState } from '@/hooks/useTraderState';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/hooks/use-toast';
-import { getBotApiBaseUrl, getKrakenWithdrawAsset, getSupabaseAccessToken } from "@/lib/botApi";
-
-interface ChimeDetails {
-  chime_routing_number: string | null;
-  chime_account_number: string | null;
-  chime_account_name: string | null;
-}
+import { getBotApiBaseUrl, getSupabaseAccessToken } from "@/lib/botApi";
 
 interface WithdrawalRequest {
   id: string;
@@ -28,15 +22,11 @@ export default function Withdraw() {
   const botApiBase = getBotApiBaseUrl();
   
   const [amount, setAmount] = useState('');
-  const [mode, setMode] = useState<'deposit' | 'withdraw'>('deposit');
   const [submitting, setSubmitting] = useState(false);
   const [withdrawals, setWithdrawals] = useState<WithdrawalRequest[]>([]);
-  const [krakenWithdrawKey, setKrakenWithdrawKey] = useState("");
-  const [krakenAsset, setKrakenAsset] = useState("ZUSD");
-  const [chimeDetails, setChimeDetails] = useState<ChimeDetails | null>(null);
-  const [loadingChime, setLoadingChime] = useState(true);
   const [krakenBalance, setKrakenBalance] = useState<number | null>(null);
   const [loadingKrakenBalance, setLoadingKrakenBalance] = useState(false);
+  const [krakenWithdrawKey, setKrakenWithdrawKey] = useState("");
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -44,7 +34,7 @@ export default function Withdraw() {
     }
   }, [user, authLoading, navigate]);
 
-  // Fetch existing withdrawal requests and Chime details
+  // Fetch existing withdrawal requests and settings
   useEffect(() => {
     if (!user) return;
     
@@ -59,29 +49,20 @@ export default function Withdraw() {
       
       if (withdrawalData) setWithdrawals(withdrawalData);
       
-      // Fetch Chime details and Kraken withdrawal key
-      setLoadingChime(true);
+      // Fetch Kraken withdrawal key
       const { data: keysData } = await supabase
         .from('user_exchange_keys')
-        .select('chime_routing_number, chime_account_number, chime_account_name, kraken_withdraw_key')
+        .select('kraken_withdraw_key')
         .eq('user_id', user.id)
         .maybeSingle();
       
-      if (keysData) {
-        setChimeDetails(keysData);
-        if (keysData.kraken_withdraw_key) {
-          setKrakenWithdrawKey(keysData.kraken_withdraw_key);
-        }
+      if (keysData?.kraken_withdraw_key) {
+        setKrakenWithdrawKey(keysData.kraken_withdraw_key);
       }
-      setLoadingChime(false);
     };
 
     fetchData();
   }, [user]);
-
-  useEffect(() => {
-    setKrakenAsset(getKrakenWithdrawAsset());
-  }, []);
 
   // Fetch Kraken balance
   const fetchKrakenBalance = async () => {
@@ -110,8 +91,8 @@ export default function Withdraw() {
 
   const getAccessToken = async () => getSupabaseAccessToken();
 
-  // Deposit money from Chime to trading account (works directly via Supabase)
-  const handleChimeDeposit = async () => {
+  // Withdraw from Kraken to bank
+  const handleWithdrawToBank = async () => {
     if (!user) return;
     
     const numAmount = parseFloat(amount);
@@ -121,126 +102,24 @@ export default function Withdraw() {
         description: 'Please enter a valid amount',
         variant: 'destructive',
       });
-      return;
-    }
-
-    if (!chimeDetails?.chime_routing_number || !chimeDetails?.chime_account_number) {
-      toast({
-        title: 'Chime Not Connected',
-        description: 'Please connect your Chime account in Settings first.',
-        variant: 'destructive',
-      });
-      navigate('/settings');
-      return;
-    }
-
-    setSubmitting(true);
-
-    try {
-      // Create deposit record
-      const { error: depositError } = await supabase
-        .from('withdrawal_requests')
-        .insert({
-          user_id: user.id,
-          amount: numAmount,
-          status: 'completed', // Mark as completed immediately
-          withdraw_type: 'deposit',
-          bank_name: chimeDetails.chime_account_name || 'Chime',
-        });
-
-      if (depositError) {
-        toast({
-          title: 'Deposit Failed',
-          description: depositError.message,
-          variant: 'destructive',
-        });
-        setSubmitting(false);
-        return;
-      }
-
-      // Update trading balance directly
-      const currentBalance = state?.balance || 0;
-      const newBalance = currentBalance + numAmount;
-
-      const { error: updateError } = await supabase
-        .from('trader_state')
-        .upsert({
-          user_id: user.id,
-          balance: newBalance,
-          updated_at: new Date().toISOString(),
-        }, { onConflict: 'user_id' });
-
-      if (updateError) {
-        console.error('Balance update error:', updateError);
-        // Still show success since deposit record was created
-      }
-
-      toast({
-        title: '✅ Deposit Successful!',
-        description: `$${numAmount.toFixed(2)} deposited from Chime. New balance: $${newBalance.toFixed(2)}`,
-      });
-      setAmount('');
-      
-      // Refresh withdrawal list
-      const { data: withdrawalData } = await supabase
-        .from('withdrawal_requests')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false })
-        .limit(10);
-      
-      if (withdrawalData) setWithdrawals(withdrawalData);
-    } catch (error) {
-      console.error('Deposit error:', error);
-      toast({
-        title: 'Error',
-        description: 'Failed to process deposit request',
-        variant: 'destructive',
-      });
-    }
-
-    setSubmitting(false);
-  };
-
-  // Real money withdrawal via Kraken to Chime
-  const handleWithdrawToChime = async () => {
-    if (!user) return;
-    
-    const numAmount = parseFloat(amount);
-    if (isNaN(numAmount) || numAmount <= 0) {
-      toast({
-        title: 'Error',
-        description: 'Please enter a valid amount',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    if (!chimeDetails?.chime_routing_number || !chimeDetails?.chime_account_number) {
-      toast({
-        title: 'Chime Not Connected',
-        description: 'Please connect your Chime account in Settings first.',
-        variant: 'destructive',
-      });
-      navigate('/settings');
       return;
     }
 
     if (!krakenWithdrawKey.trim()) {
       toast({
         title: 'Missing Kraken Withdrawal Key',
-        description: 'Please add your Chime bank as a withdrawal address in Kraken, then enter the key name in Settings.',
+        description: 'Please add your bank as a withdrawal address in Kraken, then enter the key name in Settings.',
         variant: 'destructive',
       });
       navigate('/settings');
       return;
     }
 
-    // Check against Kraken balance for real withdrawals
+    // Check against Kraken balance
     if (krakenBalance !== null && numAmount > krakenBalance) {
       toast({
         title: 'Insufficient Kraken Balance',
-        description: `Your Kraken USD balance is $${krakenBalance.toFixed(2)}. Please fund Kraken first.`,
+        description: `Your Kraken USD balance is $${krakenBalance.toFixed(2)}.`,
         variant: 'destructive',
       });
       return;
@@ -251,10 +130,10 @@ export default function Withdraw() {
     try {
       const { data, error } = await supabase.functions.invoke('kraken-withdraw', {
         body: { 
-          action: 'withdraw_to_chime',
+          action: 'withdraw_to_bank',
           amount: numAmount,
           withdraw_key: krakenWithdrawKey,
-          asset: krakenAsset
+          asset: 'USD'
         }
       });
 
@@ -267,7 +146,7 @@ export default function Withdraw() {
       } else {
         toast({
           title: '✅ Withdrawal Initiated!',
-          description: data.message || `$${numAmount.toFixed(2)} will be sent to your Chime account`,
+          description: data.message || `$${numAmount.toFixed(2)} will be sent to your bank`,
         });
         setAmount('');
         
@@ -323,12 +202,6 @@ export default function Withdraw() {
     }
   };
 
-  // Legacy Kraken withdraw - now uses the new edge function
-  const handleWithdrawViaKraken = async () => {
-    // Redirect to the new withdraw flow
-    await handleWithdrawToChime();
-  };
-
   if (authLoading || stateLoading) {
     return (
       <div className="app-container">
@@ -378,88 +251,98 @@ export default function Withdraw() {
         </div>
         <div style={{ 
           padding: '16px', 
-          background: 'linear-gradient(135deg, hsl(160, 84%, 39%, 0.1), hsl(160, 84%, 39%, 0.05))', 
+          background: 'linear-gradient(135deg, hsl(280, 84%, 50%, 0.1), hsl(280, 84%, 50%, 0.05))', 
           borderRadius: '8px',
-          border: '1px solid hsl(160, 84%, 39%, 0.3)'
+          border: '1px solid hsl(280, 84%, 50%, 0.3)'
         }}>
-          <p style={{ fontSize: '0.875rem', color: 'hsl(160, 84%, 39%)', marginBottom: '4px' }}>
-            💳 Chime Account
+          <p style={{ fontSize: '0.875rem', color: 'hsl(280, 84%, 50%)', marginBottom: '4px' }}>
+            🏦 Kraken USD Balance
           </p>
           <p style={{ fontSize: '1.5rem', fontWeight: '600' }}>
-            {chimeDetails?.chime_account_name || 'Not Connected'}
+            {loadingKrakenBalance ? 'Loading...' : formatMoney(krakenBalance || 0)}
           </p>
+          <button
+            className="plain-button"
+            onClick={fetchKrakenBalance}
+            disabled={loadingKrakenBalance}
+            style={{ marginTop: '8px', fontSize: '0.75rem', padding: '4px 8px' }}
+          >
+            Refresh
+          </button>
         </div>
       </div>
 
-      {/* Mode Toggle */}
-      <div style={{ 
-        display: 'flex', 
-        gap: '8px', 
-        marginBottom: '24px',
-        background: 'hsl(var(--muted))',
-        padding: '4px',
-        borderRadius: '8px'
-      }}>
-        <button
-          className="plain-button"
-          onClick={() => setMode('deposit')}
-          style={{
-            flex: 1,
-            background: mode === 'deposit' ? 'hsl(160, 84%, 39%)' : 'transparent',
-            color: mode === 'deposit' ? 'white' : 'hsl(var(--foreground))',
-            fontWeight: '600',
-            border: 'none'
-          }}
-        >
-          💰 Deposit to Trading
-        </button>
-        <button
-          className="plain-button"
-          onClick={() => setMode('withdraw')}
-          style={{
-            flex: 1,
-            background: mode === 'withdraw' ? 'hsl(220, 84%, 50%)' : 'transparent',
-            color: mode === 'withdraw' ? 'white' : 'hsl(var(--foreground))',
-            fontWeight: '600',
-            border: 'none'
-          }}
-        >
-          💳 Withdraw to Chime
-        </button>
-      </div>
-
-      {/* Deposit/Withdraw Form */}
+      {/* Deposit Section */}
       <div style={{ 
         padding: '20px', 
         marginBottom: '24px',
-        background: mode === 'deposit' 
-          ? 'linear-gradient(135deg, hsl(160, 84%, 39%, 0.15), hsl(160, 84%, 39%, 0.05))'
-          : 'linear-gradient(135deg, hsl(220, 84%, 50%, 0.15), hsl(220, 84%, 50%, 0.05))',
+        background: 'linear-gradient(135deg, hsl(160, 84%, 39%, 0.15), hsl(160, 84%, 39%, 0.05))',
         borderRadius: '12px',
-        border: mode === 'deposit'
-          ? '2px solid hsl(160, 84%, 39%, 0.4)'
-          : '2px solid hsl(220, 84%, 50%, 0.4)'
+        border: '2px solid hsl(160, 84%, 39%, 0.4)'
       }}>
-        <h2 style={{ fontWeight: '600', marginBottom: '8px', color: mode === 'deposit' ? 'hsl(160, 84%, 39%)' : 'hsl(220, 84%, 50%)' }}>
-          {mode === 'deposit' ? '💰 Deposit from Chime' : '💳 Withdraw to Chime'}
+        <h2 style={{ fontWeight: '600', marginBottom: '8px', color: 'hsl(160, 84%, 39%)' }}>
+          💰 Deposit Funds
         </h2>
+        <p style={{ color: 'hsl(var(--muted-foreground))', fontSize: '0.9rem', marginBottom: '16px' }}>
+          Deposit money directly to your Kraken account through the Kraken app or website.
+          Once funded, the trading bot will use your Kraken balance.
+        </p>
         
-        {loadingChime ? (
-          <p style={{ color: 'hsl(var(--muted-foreground))' }}>Loading...</p>
-        ) : chimeDetails?.chime_routing_number ? (
+        <div style={{ 
+          padding: '12px', 
+          background: 'hsl(var(--muted) / 0.5)',
+          borderRadius: '8px',
+          marginBottom: '16px'
+        }}>
+          <ol style={{ margin: 0, paddingLeft: '20px', fontSize: '0.9rem' }}>
+            <li>Open Kraken app or website</li>
+            <li>Go to Portfolio → Deposit → USD</li>
+            <li>Choose deposit method (bank, wire, etc.)</li>
+            <li>Complete the transfer</li>
+          </ol>
+        </div>
+        
+        <a 
+          href="https://www.kraken.com/sign-in" 
+          target="_blank" 
+          rel="noopener noreferrer"
+          className="plain-button"
+          style={{ 
+            display: 'inline-block',
+            fontWeight: '600', 
+            background: 'hsl(160, 84%, 39%)', 
+            color: 'white', 
+            padding: '14px 24px',
+            textDecoration: 'none'
+          }}
+        >
+          Open Kraken to Deposit →
+        </a>
+      </div>
+
+      {/* Withdraw Section */}
+      <div style={{ 
+        padding: '20px', 
+        marginBottom: '24px',
+        background: 'linear-gradient(135deg, hsl(220, 84%, 50%, 0.15), hsl(220, 84%, 50%, 0.05))',
+        borderRadius: '12px',
+        border: '2px solid hsl(220, 84%, 50%, 0.4)'
+      }}>
+        <h2 style={{ fontWeight: '600', marginBottom: '8px', color: 'hsl(220, 84%, 50%)' }}>
+          💸 Withdraw to Bank
+        </h2>
+        <p style={{ color: 'hsl(var(--muted-foreground))', fontSize: '0.9rem', marginBottom: '16px' }}>
+          {krakenWithdrawKey 
+            ? `Withdraw USD from Kraken to your saved bank (${krakenWithdrawKey})`
+            : 'Set up a withdrawal destination in Kraken first, then configure it in Settings.'
+          }
+        </p>
+        
+        {krakenWithdrawKey ? (
           <>
-            <p style={{ color: 'hsl(var(--muted-foreground))', fontSize: '0.9rem', marginBottom: '16px' }}>
-              {mode === 'deposit' 
-                ? `Move money from ${chimeDetails.chime_account_name || 'Chime'} to your trading account`
-                : `Send money from trading account to ${chimeDetails.chime_account_name || 'Chime'}`}
-            </p>
-            <p style={{ color: 'hsl(var(--muted-foreground))', fontSize: '0.85rem', marginBottom: '16px' }}>
-              Connected: {chimeDetails.chime_account_name || 'Chime'} (••••{chimeDetails.chime_account_number?.slice(-4)})
-            </p>
-            
             <div style={{ marginBottom: '16px' }}>
               <label style={{ display: 'block', marginBottom: '4px', fontWeight: '500' }}>
-                Amount {mode === 'deposit' ? 'to Deposit' : 'to Withdraw'}
+                Amount to Withdraw
               </label>
               <input
                 type="number"
@@ -472,68 +355,61 @@ export default function Withdraw() {
                 style={{ fontSize: '1.2rem', padding: '12px' }}
               />
               <p style={{ fontSize: '0.75rem', color: 'hsl(var(--muted-foreground))', marginTop: '4px' }}>
-                {mode === 'withdraw' && (
-                  <>
-                    Kraken USD Balance: {loadingKrakenBalance ? 'Loading...' : formatMoney(krakenBalance || 0)}
-                    {!krakenWithdrawKey && <span style={{ color: 'hsl(0, 84%, 50%)', marginLeft: '8px' }}>⚠️ Set Kraken withdrawal key in Settings</span>}
-                  </>
-                )}
+                Available: {formatMoney(krakenBalance || 0)}
               </p>
             </div>
             
             <button
               className="plain-button"
-              onClick={mode === 'deposit' ? handleChimeDeposit : handleWithdrawToChime}
+              onClick={handleWithdrawToBank}
               disabled={submitting || !amount}
               style={{ 
                 fontWeight: '600', 
-                background: mode === 'deposit' ? 'hsl(160, 84%, 39%)' : 'hsl(220, 84%, 50%)', 
+                background: 'hsl(220, 84%, 50%)', 
                 color: 'white',
                 padding: '14px 24px',
                 fontSize: '1rem'
               }}
             >
-              {submitting ? 'Processing...' : mode === 'deposit' ? 'Deposit to Trading Account' : 'Withdraw to Chime'}
+              {submitting ? 'Processing...' : 'Withdraw to Bank'}
             </button>
           </>
         ) : (
-          <div>
-            <p style={{ color: 'hsl(var(--muted-foreground))', marginBottom: '12px' }}>
-              Connect your Chime account to enable deposits and withdrawals.
-            </p>
+          <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+            <a 
+              href="https://www.kraken.com/sign-in" 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="plain-button"
+              style={{ 
+                display: 'inline-block',
+                fontWeight: '600', 
+                background: 'hsl(220, 84%, 50%)', 
+                color: 'white', 
+                padding: '14px 24px',
+                textDecoration: 'none'
+              }}
+            >
+              Open Kraken to Withdraw →
+            </a>
             <button
               className="plain-button"
               onClick={() => navigate('/settings')}
-              style={{ fontWeight: '600', background: 'hsl(160, 84%, 39%)', color: 'white' }}
+              style={{ fontWeight: '600' }}
             >
-              Connect Chime in Settings
+              Configure in Settings
             </button>
           </div>
         )}
       </div>
 
-      {/* Other Withdrawal Methods */}
+      {/* Other Options */}
       <details style={{ marginBottom: '24px' }}>
         <summary style={{ cursor: 'pointer', fontWeight: '600', marginBottom: '12px' }}>
-          Other Withdrawal Methods
+          Other Options
         </summary>
         
         <div style={{ padding: '16px', background: 'hsl(var(--muted))', borderRadius: '8px', marginTop: '12px' }}>
-          <div style={{ marginBottom: '16px' }}>
-            <label style={{ display: 'block', marginBottom: '4px', fontWeight: '500' }}>
-              Amount
-            </label>
-            <input
-              type="number"
-              className="plain-input"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              placeholder="0.00"
-              min="0"
-              step="0.01"
-            />
-          </div>
-
           <button
             className="plain-button"
             onClick={handleSellToCash}
@@ -542,15 +418,9 @@ export default function Withdraw() {
           >
             {submitting ? 'Please wait...' : 'Sell All Positions to Cash'}
           </button>
-
-          <button
-            className="plain-button"
-            onClick={handleWithdrawViaKraken}
-            disabled={submitting}
-            style={{ fontWeight: '600', width: '100%' }}
-          >
-            {submitting ? 'Please wait...' : 'Withdraw USD via Kraken'}
-          </button>
+          <p style={{ fontSize: '0.8rem', color: 'hsl(var(--muted-foreground))' }}>
+            Converts all open positions to USD in Kraken
+          </p>
         </div>
       </details>
 
@@ -582,11 +452,11 @@ export default function Withdraw() {
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div>
                     <p style={{ fontWeight: '500' }}>
-                      {isDeposit ? '💰 ' : '💳 '}
+                      {isDeposit ? '💰 ' : '💸 '}
                       {isDeposit ? 'Deposit' : 'Withdrawal'}: {formatMoney(w.amount)}
                     </p>
                     <p style={{ color: 'hsl(var(--muted-foreground))', fontSize: '0.875rem' }}>
-                      {w.bank_name || 'Chime'} • {w.status} • {new Date(w.created_at).toLocaleDateString()}
+                      {w.bank_name || 'Bank'} • {w.status} • {new Date(w.created_at).toLocaleDateString()}
                     </p>
                   </div>
                   <p style={{ 
