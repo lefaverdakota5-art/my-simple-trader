@@ -104,12 +104,12 @@ export default function Dashboard() {
     }, 30000);
     
     try {
-      // Buy XRP with $2 (meets minimum order requirement)
+      // Buy IP with $1 (meets minimum order requirement)
       const { data, error } = await supabase.functions.invoke("kraken-withdraw", {
         body: { 
           action: "buy_crypto",
-          pair: "XXRPZUSD",  // XRP/USD - lower minimum
-          amount_usd: 2.0    // $2 meets minimum requirement
+          pair: "IPUSD",  // IP/USD - low minimum
+          amount_usd: 1.0    // $1 minimum
         },
       });
       
