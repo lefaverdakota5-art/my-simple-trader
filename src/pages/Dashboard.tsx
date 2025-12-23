@@ -20,7 +20,6 @@ import {
   Award,
   Settings,
   LogOut,
-  Landmark,
   Users,
   ArrowDownCircle,
   Zap
@@ -185,9 +184,6 @@ export default function Dashboard() {
           <>
             <Badge variant={keyStatus.krakenOk ? "default" : "outline"} className="text-sm">
               Kraken {keyStatus.krakenOk ? "✓" : "✗"}
-            </Badge>
-            <Badge variant={keyStatus.plaidOk ? "default" : "outline"} className="text-sm">
-              Plaid {keyStatus.plaidOk ? "✓" : "✗"}
             </Badge>
             <Badge variant={keyStatus.openaiOk ? "default" : "outline"} className="text-sm">
               OpenAI {keyStatus.openaiOk ? "✓" : "○"}
@@ -379,15 +375,7 @@ export default function Dashboard() {
       </div>
 
       {/* Additional Actions */}
-      <div className="grid grid-cols-2 gap-3 mb-6">
-        <button
-          onClick={() => navigate('/bank')}
-          className="p-4 rounded-lg border-2 border-border bg-background hover:bg-muted font-semibold transition-all"
-        >
-          <Landmark className="h-5 w-5 mx-auto mb-1" />
-          Banking (Plaid)
-        </button>
-
+      <div className="grid grid-cols-1 gap-3 mb-6">
         <button
           onClick={() => navigate('/settings')}
           className="p-4 rounded-lg border-2 border-border bg-background hover:bg-muted font-semibold transition-all"
