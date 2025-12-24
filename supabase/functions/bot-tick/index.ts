@@ -133,28 +133,30 @@ async function krakenOHLC(pair: string): Promise<{ high: number; low: number; vo
 }
 
 function council(pct: number, ordersLeft: boolean) {
-  // Smart basic council - approves momentum AND dip-buying opportunities
-  // For dips: more negative = better buy opportunity (contrarian strategy)
-  const isDip = pct < -3.0; // Significant dip
-  const isMomentum = pct > 0.05; // Positive momentum
+  // AGGRESSIVE MICRO-PROFIT COUNCIL - approves almost any trade for constant scalping
+  // Goal: Trade constantly for even 0.01% gains to compound profits
+  const hasAnyMovement = pct !== 0; // Any price movement = opportunity
+  const isDip = pct < -0.1; // Even tiny dips (0.1%) are buy opportunities
+  const isMomentum = pct > 0.01; // Even 0.01% positive = momentum
+  const isScalpable = Math.abs(pct) >= 0.01; // Any movement >= 0.01% is tradeable
   
-  const ai1 = isMomentum || isDip; // Momentum OR dip opportunity
-  const ai2 = pct > -20.0; // Not a complete crash (>20% drop is too risky)
-  const ai3 = pct !== 0; // Has some movement
-  const ai4 = Math.abs(pct) <= 20.0 || isDip; // Volatility OK, or it's a dip buy
+  const ai1 = hasAnyMovement; // Any movement = trade opportunity
+  const ai2 = pct > -30.0; // Only avoid complete crash (>30% drop)
+  const ai3 = isScalpable; // Has scalping opportunity
+  const ai4 = isMomentum || isDip; // Either momentum or dip = good
   const ai5 = ordersLeft;
   const votes = [ai1, ai2, ai3, ai4, ai5];
   const yes = votes.filter(Boolean).length;
   
-  const signal = isDip ? "DIP-BUY" : (isMomentum ? "MOMENTUM" : "NEUTRAL");
+  const signal = isDip ? "DIP-BUY" : (isMomentum ? "SCALP" : "MICRO-TRADE");
   const reasons = [
-    `${ai1 ? "YES" : "NO"}: Signal Detector • ${signal} (${pct.toFixed(2)}%)`,
-    `${ai2 ? "YES" : "NO"}: Crash Guard • not crashing >-20% (${pct.toFixed(2)}%)`,
-    `${ai3 ? "YES" : "NO"}: Activity Checker • has price movement`,
-    `${ai4 ? "YES" : "NO"}: Volatility/Dip Guard • OK for trading`,
-    `${ai5 ? "YES" : "NO"}: Portfolio Guardian • daily order limit`,
+    `${ai1 ? "YES" : "NO"}: Movement Detector • ${signal} (${pct.toFixed(4)}%)`,
+    `${ai2 ? "YES" : "NO"}: Crash Guard • not crashing >-30%`,
+    `${ai3 ? "YES" : "NO"}: Scalp Detector • movement >= 0.01%`,
+    `${ai4 ? "YES" : "NO"}: Trade Signal • momentum OR dip`,
+    `${ai5 ? "YES" : "NO"}: Order Capacity • can trade`,
   ];
-  return { votes: `${yes}/5`, reasons, approved: yes >= 3 }; // 3/5 = 60% approval for basic council
+  return { votes: `${yes}/5`, reasons, approved: yes >= 2 }; // 2/5 = 40% approval for AGGRESSIVE trading
 }
 
 // Generic AI vote helper - uses Lovable AI (no API key needed)
@@ -1260,6 +1262,14 @@ async function krakenSign(path: string, nonce: string, postData: string, secret:
   return btoa(String.fromCharCode(...new Uint8Array(signature)));
 }
 
+// Global nonce counter for Kraken API (must always increase)
+let krakenNonceCounter = Date.now() * 1000;
+
+function getKrakenNonce(): string {
+  krakenNonceCounter++;
+  return krakenNonceCounter.toString();
+}
+
 // Place BUY order on Kraken
 async function krakenPlaceOrder(opts: {
   krakenKey: string;
@@ -1267,7 +1277,7 @@ async function krakenPlaceOrder(opts: {
   pair: string;
   volumeUsd: number;
 }): Promise<{ txid: string[]; price: number; volume: number }> {
-  const nonce = Date.now().toString();
+  const nonce = getKrakenNonce();
   const path = "/0/private/AddOrder";
   
   // Get current price to calculate volume
@@ -1319,7 +1329,7 @@ async function krakenPlaceSellOrder(opts: {
   pair: string;
   volume: number;
 }): Promise<{ txid: string[]; price: number }> {
-  const nonce = Date.now().toString();
+  const nonce = getKrakenNonce();
   const path = "/0/private/AddOrder";
   
   // Get current price
@@ -1577,8 +1587,8 @@ serve(async (req) => {
     const supabaseAdmin = createClient(supabaseUrl, serviceKey);
     const allowLive = envBool("BOT_ALLOW_LIVE", false);
     const defaultSymbol = (Deno.env.get("BOT_DEFAULT_SYMBOL") || "BTC").toUpperCase();
-    const notionalUsd = Number(Deno.env.get("BOT_MAX_NOTIONAL_USD") || "50"); // $50 per trade
-    const maxOrdersPerDay = Number(Deno.env.get("BOT_MAX_ORDERS_PER_DAY") || "100"); // More trades allowed
+    const notionalUsd = Number(Deno.env.get("BOT_MAX_NOTIONAL_USD") || "1"); // $1 minimum trades for micro-profits
+    const maxOrdersPerDay = Number(Deno.env.get("BOT_MAX_ORDERS_PER_DAY") || "500"); // 500 trades/day for constant scalping
     
     // All available Kraken trading pairs - Crypto + xStocks (Tokenized Stocks & ETFs)
     // COMPREHENSIVE LIST: 250+ Crypto + 200+ Stocks/ETFs
@@ -2357,10 +2367,22 @@ serve(async (req) => {
     const pairData = await Promise.all(pairDataPromises);
     
     // Find best trading opportunity (looking for dips or strong momentum)
+    // PRIORITIZE CRYPTO over stocks to avoid geographic restrictions
     for (const pd of pairData) {
+      // Skip pairs with 0% change (no data or unavailable)
+      if (pd.pct === 0) continue;
+      
       // Prefer dips (negative), but also consider strong positive momentum
       const score = pd.pct < 0 ? Math.abs(pd.pct) * 2 : pd.pct; // Weight dips higher
-      if (score > Math.abs(bestPct) || bestPct === 0) {
+      
+      // Give crypto priority over stocks (stocks may be restricted)
+      const assetType = (pd as { type?: string }).type || "crypto";
+      const currentBestType = (bestPair as { type?: string }).type || "crypto";
+      const cryptoBonus = assetType === "crypto" ? 1.5 : 1; // Crypto gets 50% score bonus
+      const adjustedScore = score * cryptoBonus;
+      const currentBestScore = (bestPct < 0 ? Math.abs(bestPct) * 2 : bestPct) * (currentBestType === "crypto" ? 1.5 : 1);
+      
+      if (adjustedScore > currentBestScore || bestPct === 0) {
         bestPair = pd;
         bestPct = pd.pct;
         bestOhlc = pd.ohlc;
@@ -2537,10 +2559,10 @@ serve(async (req) => {
         c.reasons.push(`${lovableVote.vote ? "YES" : "NO"}: AI Strategist • ${lovableVote.reason}`);
       }
 
-      // SMART THRESHOLD SYSTEM:
-      // - If AI votes are available (>3 responses), use 60% threshold
-      // - If AI is rate-limited (<3 responses), use BASIC COUNCIL ONLY with 3/5 threshold
-      // - Penny stocks and meme coins get LOWER threshold (50%) for volatility plays
+      // AGGRESSIVE MICRO-PROFIT THRESHOLD SYSTEM:
+      // - Trade as often as possible for penny gains
+      // - Very low threshold (30-40%) to approve almost any trade
+      // - Goal: Constant buying/selling for compound growth
       
       const isPennyOrMeme = assetType === "stock" && (
         bestPair.symbol.length <= 4 || // Short tickers often penny stocks
@@ -2551,19 +2573,17 @@ serve(async (req) => {
       let thresholdReason: string;
       
       if (aiVotesReceived >= 3) {
-        // AI council active - use 60% threshold
-        thresholdPercent = isPennyOrMeme ? 0.50 : 0.60;
-        thresholdReason = isPennyOrMeme ? "penny/meme-mode" : "ai-council-active";
+        // AI council active - use AGGRESSIVE 30% threshold for constant trading
+        thresholdPercent = isPennyOrMeme ? 0.25 : 0.30;
+        thresholdReason = isPennyOrMeme ? "aggressive-penny-mode" : "aggressive-scalp-mode";
       } else {
-        // AI rate limited - FALLBACK to basic council
-        // Basic council already has 5 votes, use 3/5 = 60% for approval
-        thresholdPercent = isPennyOrMeme ? 0.40 : 0.60;
-        thresholdReason = "fallback-basic-council";
-        // In fallback mode, the basic council votes count more
-        c.reasons.push("⚠️ FALLBACK MODE: AI rate-limited, using basic council votes");
+        // AI rate limited - STILL AGGRESSIVE with basic council
+        thresholdPercent = isPennyOrMeme ? 0.20 : 0.25;
+        thresholdReason = "aggressive-fallback";
+        c.reasons.push("⚡ SCALP MODE: Trading aggressively for micro-profits");
       }
       
-      const threshold = Math.max(Math.ceil(totalMembers * thresholdPercent), 3); // Minimum 3 votes needed
+      const threshold = Math.max(Math.ceil(totalMembers * thresholdPercent), 2); // Minimum 2 votes (very aggressive)
       console.log(`[bot-tick] Threshold: ${(thresholdPercent * 100).toFixed(0)}% (${thresholdReason}) = ${threshold}/${totalMembers} votes needed, got ${yesVotes}, AI responses: ${aiVotesReceived}`);
       
       c = {
