@@ -14,6 +14,201 @@ export type Database = {
   }
   public: {
     Tables: {
+      balances_snapshot: {
+        Row: {
+          available_usd: number | null
+          created_at: string | null
+          holdings: Json | null
+          id: string
+          open_orders_count: number | null
+          reserved_usd: number | null
+          snapshot_at: string | null
+          total_usd: number | null
+          user_id: string
+        }
+        Insert: {
+          available_usd?: number | null
+          created_at?: string | null
+          holdings?: Json | null
+          id?: string
+          open_orders_count?: number | null
+          reserved_usd?: number | null
+          snapshot_at?: string | null
+          total_usd?: number | null
+          user_id: string
+        }
+        Update: {
+          available_usd?: number | null
+          created_at?: string | null
+          holdings?: Json | null
+          id?: string
+          open_orders_count?: number | null
+          reserved_usd?: number | null
+          snapshot_at?: string | null
+          total_usd?: number | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      bot_config: {
+        Row: {
+          cooldown_seconds: number | null
+          created_at: string | null
+          id: string
+          keep_usd_reserve: number | null
+          kill_switch: boolean | null
+          max_daily_loss_pct: number | null
+          max_exposure_per_asset_pct: number | null
+          max_orders_per_tick: number | null
+          mode: string | null
+          pairs: string[] | null
+          sell_target_usd: number | null
+          stop_loss_pct: number | null
+          take_profit_pct: number | null
+          trade_size_pct: number | null
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          cooldown_seconds?: number | null
+          created_at?: string | null
+          id?: string
+          keep_usd_reserve?: number | null
+          kill_switch?: boolean | null
+          max_daily_loss_pct?: number | null
+          max_exposure_per_asset_pct?: number | null
+          max_orders_per_tick?: number | null
+          mode?: string | null
+          pairs?: string[] | null
+          sell_target_usd?: number | null
+          stop_loss_pct?: number | null
+          take_profit_pct?: number | null
+          trade_size_pct?: number | null
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          cooldown_seconds?: number | null
+          created_at?: string | null
+          id?: string
+          keep_usd_reserve?: number | null
+          kill_switch?: boolean | null
+          max_daily_loss_pct?: number | null
+          max_exposure_per_asset_pct?: number | null
+          max_orders_per_tick?: number | null
+          mode?: string | null
+          pairs?: string[] | null
+          sell_target_usd?: number | null
+          stop_loss_pct?: number | null
+          take_profit_pct?: number | null
+          trade_size_pct?: number | null
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      cashout_plans: {
+        Row: {
+          completed_at: string | null
+          created_at: string | null
+          id: string
+          keep_for_bots_usd: number | null
+          pull_amount_usd: number
+          status: string | null
+          user_id: string
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string | null
+          id?: string
+          keep_for_bots_usd?: number | null
+          pull_amount_usd: number
+          status?: string | null
+          user_id: string
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string | null
+          id?: string
+          keep_for_bots_usd?: number | null
+          pull_amount_usd?: number
+          status?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      fee_cache: {
+        Row: {
+          id: string
+          maker_fee: number | null
+          taker_fee: number | null
+          updated_at: string | null
+          user_id: string
+          volume_30d: number | null
+        }
+        Insert: {
+          id?: string
+          maker_fee?: number | null
+          taker_fee?: number | null
+          updated_at?: string | null
+          user_id: string
+          volume_30d?: number | null
+        }
+        Update: {
+          id?: string
+          maker_fee?: number | null
+          taker_fee?: number | null
+          updated_at?: string | null
+          user_id?: string
+          volume_30d?: number | null
+        }
+        Relationships: []
+      }
+      pair_rules: {
+        Row: {
+          base_asset: string
+          costmin: number | null
+          id: string
+          kraken_pair: string
+          lot_decimals: number | null
+          ordermin: number | null
+          pair: string
+          pair_decimals: number | null
+          quote_asset: string | null
+          status: string | null
+          tick_size: number | null
+          updated_at: string | null
+        }
+        Insert: {
+          base_asset: string
+          costmin?: number | null
+          id?: string
+          kraken_pair: string
+          lot_decimals?: number | null
+          ordermin?: number | null
+          pair: string
+          pair_decimals?: number | null
+          quote_asset?: string | null
+          status?: string | null
+          tick_size?: number | null
+          updated_at?: string | null
+        }
+        Update: {
+          base_asset?: string
+          costmin?: number | null
+          id?: string
+          kraken_pair?: string
+          lot_decimals?: number | null
+          ordermin?: number | null
+          pair?: string
+          pair_decimals?: number | null
+          quote_asset?: string | null
+          status?: string | null
+          tick_size?: number | null
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
       plaid_accounts: {
         Row: {
           account_id: string
@@ -161,6 +356,42 @@ export type Database = {
         }
         Relationships: []
       }
+      system_health: {
+        Row: {
+          executor_online: boolean | null
+          id: string
+          kraken_error_count_15m: number | null
+          last_balance_sync_at: string | null
+          last_error: string | null
+          last_exec_at: string | null
+          last_tick_at: string | null
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          executor_online?: boolean | null
+          id?: string
+          kraken_error_count_15m?: number | null
+          last_balance_sync_at?: string | null
+          last_error?: string | null
+          last_exec_at?: string | null
+          last_tick_at?: string | null
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          executor_online?: boolean | null
+          id?: string
+          kraken_error_count_15m?: number | null
+          last_balance_sync_at?: string | null
+          last_error?: string | null
+          last_exec_at?: string | null
+          last_tick_at?: string | null
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       trader_state: {
         Row: {
           autonomy_mode: boolean | null
@@ -227,6 +458,116 @@ export type Database = {
           id?: string
           message?: string
           user_id?: string
+        }
+        Relationships: []
+      }
+      trading_fills: {
+        Row: {
+          cost_usd: number
+          fee_usd: number | null
+          filled_at: string | null
+          id: string
+          kraken_txid: string | null
+          order_id: string | null
+          pair: string
+          price: number
+          realized_pnl: number | null
+          side: string
+          user_id: string
+          volume: number
+        }
+        Insert: {
+          cost_usd: number
+          fee_usd?: number | null
+          filled_at?: string | null
+          id?: string
+          kraken_txid?: string | null
+          order_id?: string | null
+          pair: string
+          price: number
+          realized_pnl?: number | null
+          side: string
+          user_id: string
+          volume: number
+        }
+        Update: {
+          cost_usd?: number
+          fee_usd?: number | null
+          filled_at?: string | null
+          id?: string
+          kraken_txid?: string | null
+          order_id?: string | null
+          pair?: string
+          price?: number
+          realized_pnl?: number | null
+          side?: string
+          user_id?: string
+          volume?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "trading_fills_order_id_fkey"
+            columns: ["order_id"]
+            isOneToOne: false
+            referencedRelation: "trading_orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      trading_orders: {
+        Row: {
+          closed_at: string | null
+          cost_usd: number | null
+          created_at: string | null
+          fee_usd: number | null
+          id: string
+          intent_id: string | null
+          kraken_txid: string | null
+          order_type: string | null
+          pair: string
+          price: number | null
+          reject_reason: string | null
+          side: string
+          status: string | null
+          updated_at: string | null
+          user_id: string
+          volume: number
+        }
+        Insert: {
+          closed_at?: string | null
+          cost_usd?: number | null
+          created_at?: string | null
+          fee_usd?: number | null
+          id?: string
+          intent_id?: string | null
+          kraken_txid?: string | null
+          order_type?: string | null
+          pair: string
+          price?: number | null
+          reject_reason?: string | null
+          side: string
+          status?: string | null
+          updated_at?: string | null
+          user_id: string
+          volume: number
+        }
+        Update: {
+          closed_at?: string | null
+          cost_usd?: number | null
+          created_at?: string | null
+          fee_usd?: number | null
+          id?: string
+          intent_id?: string | null
+          kraken_txid?: string | null
+          order_type?: string | null
+          pair?: string
+          price?: number | null
+          reject_reason?: string | null
+          side?: string
+          status?: string | null
+          updated_at?: string | null
+          user_id?: string
+          volume?: number
         }
         Relationships: []
       }
@@ -388,6 +729,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      get_portfolio_snapshot: { Args: { p_user_id: string }; Returns: Json }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
