@@ -9,6 +9,8 @@ import Council from "./pages/Council";
 import Withdraw from "./pages/Withdraw";
 import Install from "./pages/Install";
 import Settings from "./pages/Settings";
+import BotSettings from "./pages/BotSettings";
+import CashOut from "./pages/CashOut";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -26,6 +28,8 @@ const App = () => (
           <Route path="/withdraw" element={<Withdraw />} />
           <Route path="/install" element={<Install />} />
           <Route path="/settings" element={<Settings />} />
+          <Route path="/bot-settings" element={<BotSettings />} />
+          <Route path="/cashout" element={<CashOut />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>
