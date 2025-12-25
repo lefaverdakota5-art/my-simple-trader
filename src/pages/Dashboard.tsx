@@ -1,38 +1,46 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
-import { useTraderState } from '@/hooks/useTraderState';
-import { supabase } from "@/integrations/supabase/client";
+import { usePortfolioSnapshot } from '@/hooks/usePortfolioSnapshot';
+import { useBotConfig } from '@/hooks/useBotConfig';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { PerformanceChart } from "@/components/PerformanceChart";
-import { CryptoPriceTicker } from "@/components/CryptoPriceTicker";
-import { CryptoMarketGrid } from "@/components/CryptoMarketGrid";
-import { PositionsTracker } from "@/components/PositionsTracker";
-import { GoalTracker10M } from "@/components/GoalTracker10M";
+import { LiveStatusDot } from '@/components/LiveStatusDot';
+import { HoldingsList } from '@/components/HoldingsList';
+import { OrdersList } from '@/components/OrdersList';
+import { FillsList } from '@/components/FillsList';
+import { KrakenLinks } from '@/components/KrakenLinks';
+import { BotOnOffSwitch } from '@/components/BotOnOffSwitch';
 import { toast } from "sonner";
 import { 
-  TrendingUp, 
-  TrendingDown, 
   Wallet, 
   Activity, 
-  Target, 
-  Award,
   Settings,
   LogOut,
-  Users,
   ArrowDownCircle,
-  Zap
+  RefreshCw,
+  AlertTriangle,
+  Clock
 } from "lucide-react";
 
 export default function Dashboard() {
-  const { user, loading: authLoading, signOut, initializeTraderState } = useAuth();
-  const { state, trades, loading: stateLoading, toggleSwarm, toggleAutonomy, krakenBalance, loadingKraken, refreshKrakenBalance } = useTraderState(user?.id || null);
+  const { user, loading: authLoading, signOut } = useAuth();
   const navigate = useNavigate();
-  const [keyStatus, setKeyStatus] = useState<
-    null | { ok: boolean; krakenOk?: boolean; plaidOk?: boolean; openaiOk?: boolean }
-  >(null);
-  const [tradingLoading, setTradingLoading] = useState(false);
+  
+  const { 
+    snapshot, 
+    loading: snapshotLoading, 
+    refresh, 
+    isLive, 
+    lastRefresh 
+  } = usePortfolioSnapshot(user?.id || null, { autoRefreshMs: 15000 });
+  
+  const { 
+    config, 
+    loading: configLoading, 
+    toggleKillSwitch,
+    saving 
+  } = useBotConfig(user?.id || null);
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -40,36 +48,7 @@ export default function Dashboard() {
     }
   }, [user, authLoading, navigate]);
 
-  useEffect(() => {
-    if (user) {
-      initializeTraderState(user.id);
-    }
-  }, [user, initializeTraderState]);
-
-  useEffect(() => {
-    (async () => {
-      if (!user) return;
-      try {
-        const { data, error } = await supabase.functions.invoke("bot-actions", {
-          body: { action: "status" },
-        });
-        if (error) {
-          setKeyStatus({ ok: false });
-          return;
-        }
-        setKeyStatus({
-          ok: true,
-          krakenOk: Boolean(data?.krakenOk),
-          plaidOk: Boolean(data?.plaidOk),
-          openaiOk: Boolean(data?.openaiOk),
-        });
-      } catch {
-        setKeyStatus({ ok: false });
-      }
-    })();
-  }, [user]);
-
-  if (authLoading || stateLoading) {
+  if (authLoading || snapshotLoading || configLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="text-center">
@@ -92,63 +71,38 @@ export default function Dashboard() {
     navigate('/');
   };
 
-  const handleTestRealTrade = async () => {
-    if (!user || tradingLoading) return;
-    
-    setTradingLoading(true);
-    
-    // Safety timeout to prevent stuck loading
-    const timeout = setTimeout(() => {
-      setTradingLoading(false);
-      toast.error("Trade request timed out");
-    }, 30000);
-    
-    try {
-      // Buy IP with $1 (meets minimum order requirement)
-      const { data, error } = await supabase.functions.invoke("kraken-withdraw", {
-        body: { 
-          action: "buy_crypto",
-          pair: "IPUSD",  // IP/USD - low minimum
-          amount_usd: 1.0    // $1 minimum
-        },
-      });
-      
-      clearTimeout(timeout);
-      
-      if (error) {
-        toast.error("Trade failed: " + error.message);
-        setTradingLoading(false);
-        return;
-      }
-      
-      if (data?.error) {
-        toast.error(data.error);
-        setTradingLoading(false);
-        return;
-      }
-      
-      toast.success(data.message || "Trade executed successfully!");
-      console.log("Trade result:", data);
-      
-      // Refresh Kraken balance after trade
-      refreshKrakenBalance();
-      
-    } catch (err) {
-      clearTimeout(timeout);
-      toast.error("Trade failed: " + (err instanceof Error ? err.message : "Unknown error"));
-    } finally {
-      setTradingLoading(false);
-    }
+  const handleSyncNow = async () => {
+    toast.info('Syncing...');
+    await refresh(true);
+    toast.success('Portfolio synced');
   };
 
-  const profitIsPositive = (state?.todays_profit || 0) >= 0;
+  const balance = snapshot?.balance;
+  const health = snapshot?.health;
+  const botsOn = config && !config.kill_switch;
+
+  // Warnings
+  const warnings: string[] = [];
+  if (!health?.executor_online) warnings.push('Executor offline');
+  if ((health?.kraken_error_count_15m || 0) > 3) warnings.push('Kraken errors detected');
+  if (config?.kill_switch) warnings.push('Bots paused');
 
   return (
     <div className="min-h-screen bg-background p-4 md:p-6 max-w-4xl mx-auto">
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl md:text-3xl font-bold">Trading Dashboard</h1>
+        <div className="flex items-center gap-4">
+          <h1 className="text-2xl md:text-3xl font-bold">Trading Dashboard</h1>
+          <LiveStatusDot isLive={isLive} />
+        </div>
         <div className="flex gap-2">
+          <button
+            onClick={handleSyncNow}
+            className="p-2 rounded-lg border border-border hover:bg-muted transition-colors"
+            title="Sync Now"
+          >
+            <RefreshCw className="h-5 w-5" />
+          </button>
           <button
             onClick={() => navigate('/settings')}
             className="p-2 rounded-lg border border-border hover:bg-muted transition-colors"
@@ -166,255 +120,183 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Crypto Price Ticker */}
+      {/* Warnings */}
+      {warnings.length > 0 && (
+        <div className="mb-4 p-3 rounded-lg bg-yellow-50 dark:bg-yellow-950 border border-yellow-200 dark:border-yellow-800">
+          <div className="flex items-center gap-2 text-yellow-700 dark:text-yellow-300">
+            <AlertTriangle className="h-4 w-4" />
+            <span className="font-medium">Warnings:</span>
+            {warnings.map((w, i) => (
+              <Badge key={i} variant="outline" className="text-yellow-700 border-yellow-300">
+                {w}
+              </Badge>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Bot ON/OFF Switch */}
       <div className="mb-6">
-        <CryptoPriceTicker />
+        <BotOnOffSwitch 
+          isOn={botsOn || false}
+          onToggle={toggleKillSwitch}
+          disabled={saving}
+        />
       </div>
 
-      {/* Bot Status Bar */}
-      <div className="flex flex-wrap gap-2 mb-6">
-        <Badge variant={state?.swarm_active ? "default" : "secondary"} className="text-sm">
-          <Activity className="h-3 w-3 mr-1" />
-          Swarm {state?.swarm_active ? 'Active' : 'Inactive'}
-        </Badge>
-        <Badge variant={state?.autonomy_mode ? "default" : "secondary"} className="text-sm">
-          Autonomy {state?.autonomy_mode ? 'ON' : 'OFF'}
-        </Badge>
-        {keyStatus && (
-          <>
-            <Badge variant={keyStatus.krakenOk ? "default" : "outline"} className="text-sm">
-              Kraken {keyStatus.krakenOk ? "✓" : "✗"}
-            </Badge>
-            <Badge variant={keyStatus.openaiOk ? "default" : "outline"} className="text-sm">
-              OpenAI {keyStatus.openaiOk ? "✓" : "○"}
-            </Badge>
-          </>
-        )}
-      </div>
-
-      {/* Stats Grid */}
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
+      {/* Balance Cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
         <Card className="border-2 border-primary/30 bg-primary/5">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-primary flex items-center gap-2">
               <Wallet className="h-4 w-4" />
-              Kraken Balance (Real $)
+              Total USD
             </CardTitle>
           </CardHeader>
           <CardContent>
             <p className="text-2xl font-bold">
-              {loadingKraken ? 'Loading...' : formatMoney(krakenBalance ?? 0)}
-            </p>
-            <button 
-              onClick={() => refreshKrakenBalance(true)}
-              disabled={loadingKraken}
-              className="text-xs text-muted-foreground hover:text-foreground mt-1"
-            >
-              ↻ Refresh
-            </button>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-              {profitIsPositive ? (
-                <TrendingUp className="h-4 w-4 text-green-600" />
-              ) : (
-                <TrendingDown className="h-4 w-4 text-red-600" />
-              )}
-              Today's P/L
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className={`text-2xl font-bold ${profitIsPositive ? 'text-green-600' : 'text-red-600'}`}>
-              {profitIsPositive ? '+' : ''}{formatMoney(state?.todays_profit || 0)}
+              {formatMoney(balance?.total_usd || 0)}
             </p>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-              <Activity className="h-4 w-4" />
-              Portfolio
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Available
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-2xl font-bold">{formatMoney(state?.portfolio_value || 0)}</p>
+            <p className="text-xl font-bold text-green-600">
+              {formatMoney(balance?.available_usd || 0)}
+            </p>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-              <Target className="h-4 w-4" />
-              Progress to $1M
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Reserved
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-2xl font-bold">{(state?.progress_percent || 0).toFixed(2)}%</p>
-            <div className="w-full bg-muted rounded-full h-2 mt-2">
-              <div 
-                className="bg-foreground rounded-full h-2 transition-all" 
-                style={{ width: `${Math.min(state?.progress_percent || 0, 100)}%` }}
-              />
+            <p className="text-xl font-bold text-orange-600">
+              {formatMoney(balance?.reserved_usd || 0)}
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Open Orders
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-xl font-bold">
+              {balance?.open_orders_count || 0}
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Bot Status */}
+      <Card className="mb-6">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm font-medium flex items-center gap-2">
+            <Activity className="h-4 w-4" />
+            Bot Status
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+            <div>
+              <span className="text-muted-foreground">Mode:</span>
+              <Badge className="ml-2" variant={config?.mode === 'paused' ? 'secondary' : 'default'}>
+                {config?.mode || 'Unknown'}
+              </Badge>
             </div>
-          </CardContent>
-        </Card>
+            <div>
+              <span className="text-muted-foreground">Executor:</span>
+              <Badge className="ml-2" variant={health?.executor_online ? 'default' : 'destructive'}>
+                {health?.executor_online ? 'Online' : 'Offline'}
+              </Badge>
+            </div>
+            <div className="flex items-center gap-1">
+              <Clock className="h-3 w-3 text-muted-foreground" />
+              <span className="text-muted-foreground">Last Tick:</span>
+              <span className="text-xs">
+                {health?.last_tick_at ? new Date(health.last_tick_at).toLocaleTimeString() : 'Never'}
+              </span>
+            </div>
+            <div className="flex items-center gap-1">
+              <Clock className="h-3 w-3 text-muted-foreground" />
+              <span className="text-muted-foreground">Last Sync:</span>
+              <span className="text-xs">
+                {health?.last_balance_sync_at ? new Date(health.last_balance_sync_at).toLocaleTimeString() : 'Never'}
+              </span>
+            </div>
+          </div>
+          {health?.kraken_error_count_15m && health.kraken_error_count_15m > 0 && (
+            <div className="mt-2 text-sm text-red-600">
+              Kraken errors (15m): {health.kraken_error_count_15m}
+            </div>
+          )}
+          {health?.last_error && (
+            <div className="mt-2 text-xs text-red-500 truncate">
+              Last error: {health.last_error}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-              <Award className="h-4 w-4" />
-              Win Rate
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-2xl font-bold">{(state?.win_rate || 0).toFixed(1)}%</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-              <Activity className="h-4 w-4" />
-              Last Update
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-sm font-medium">
-              {state?.updated_at ? new Date(state.updated_at).toLocaleTimeString() : 'Never'}
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* $10M Goal Tracker */}
+      {/* Quick Links */}
       <div className="mb-6">
-        <GoalTracker10M 
-          portfolioValue={state?.portfolio_value || state?.balance || 0}
-          dailyProfit={state?.todays_profit || 0}
-          winRate={state?.win_rate || 0}
-        />
+        <KrakenLinks />
       </div>
 
-      {/* Performance Chart */}
+      {/* Holdings */}
       <div className="mb-6">
-        <PerformanceChart 
-          trades={trades} 
-          currentState={state ? {
-            balance: state.balance,
-            portfolio_value: state.portfolio_value,
-            todays_profit: state.todays_profit,
-            win_rate: state.win_rate,
-          } : null} 
-        />
+        <HoldingsList holdings={balance?.holdings || {}} />
       </div>
 
-      {/* Positions Tracker */}
-      <div className="mb-6">
-        <PositionsTracker userId={user?.id || null} />
-      </div>
-
-      {/* Crypto Market Grid */}
-      <div className="mb-6">
-        <CryptoMarketGrid />
-      </div>
-
-      {/* Control Buttons */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
+      {/* Action Buttons */}
+      <div className="grid grid-cols-3 gap-3 mb-6">
         <button
-          onClick={handleTestRealTrade}
-          disabled={tradingLoading}
-          className="p-4 rounded-lg border-2 border-primary bg-primary/10 hover:bg-primary/20 text-primary font-semibold transition-all disabled:opacity-50"
-        >
-          <Zap className="h-5 w-5 mx-auto mb-1" />
-          {tradingLoading ? 'Trading...' : 'Test Trade $1'}
-        </button>
-
-        <button
-          onClick={toggleSwarm}
-          className={`p-4 rounded-lg border-2 font-semibold transition-all ${
-            state?.swarm_active 
-              ? 'border-green-600 bg-green-50 text-green-700' 
-              : 'border-border bg-background hover:bg-muted'
-          }`}
-        >
-          <Activity className="h-5 w-5 mx-auto mb-1" />
-          Swarm {state?.swarm_active ? 'ON' : 'OFF'}
-        </button>
-
-        <button
-          onClick={toggleAutonomy}
-          className={`p-4 rounded-lg border-2 font-semibold transition-all ${
-            state?.autonomy_mode 
-              ? 'border-green-600 bg-green-50 text-green-700' 
-              : 'border-border bg-background hover:bg-muted'
-          }`}
-        >
-          <Target className="h-5 w-5 mx-auto mb-1" />
-          Autonomy {state?.autonomy_mode ? 'ON' : 'OFF'}
-        </button>
-
-        <button
-          onClick={() => navigate('/council')}
+          onClick={() => navigate('/bot-settings')}
           className="p-4 rounded-lg border-2 border-border bg-background hover:bg-muted font-semibold transition-all"
         >
-          <Users className="h-5 w-5 mx-auto mb-1" />
-          AI Council
+          <Settings className="h-5 w-5 mx-auto mb-1" />
+          Bot Settings
         </button>
-
+        <button
+          onClick={() => navigate('/cashout')}
+          className="p-4 rounded-lg border-2 border-orange-500 bg-orange-50 dark:bg-orange-950 text-orange-600 font-semibold transition-all hover:bg-orange-100"
+        >
+          <ArrowDownCircle className="h-5 w-5 mx-auto mb-1" />
+          Cash Out
+        </button>
         <button
           onClick={() => navigate('/withdraw')}
           className="p-4 rounded-lg border-2 border-border bg-background hover:bg-muted font-semibold transition-all"
         >
-          <ArrowDownCircle className="h-5 w-5 mx-auto mb-1" />
-          Withdraw
+          <Wallet className="h-5 w-5 mx-auto mb-1" />
+          Banking
         </button>
       </div>
 
-      {/* Additional Actions */}
-      <div className="grid grid-cols-1 gap-3 mb-6">
-        <button
-          onClick={() => navigate('/settings')}
-          className="p-4 rounded-lg border-2 border-border bg-background hover:bg-muted font-semibold transition-all"
-        >
-          <Settings className="h-5 w-5 mx-auto mb-1" />
-          Settings
-        </button>
+      {/* Orders & Fills */}
+      <div className="grid md:grid-cols-2 gap-6 mb-6">
+        <OrdersList orders={snapshot?.open_orders || []} />
+        <FillsList fills={snapshot?.recent_fills || []} />
       </div>
 
-      {/* Recent Trades */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Activity className="h-5 w-5" />
-            Recent Trades
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="max-h-64 overflow-y-auto space-y-2">
-            {trades.length === 0 ? (
-              <p className="text-muted-foreground text-center py-8">
-                No trades yet. Enable the swarm to start trading.
-              </p>
-            ) : (
-              trades.map((trade) => (
-                <div 
-                  key={trade.id} 
-                  className="flex items-center justify-between p-3 bg-muted/50 rounded-lg"
-                >
-                  <span className="text-sm font-medium">{trade.message}</span>
-                  <span className="text-xs text-muted-foreground">
-                    {new Date(trade.created_at).toLocaleString()}
-                  </span>
-                </div>
-              ))
-            )}
-          </div>
-        </CardContent>
-      </Card>
+      {/* Last Refresh */}
+      {lastRefresh && (
+        <div className="text-center text-xs text-muted-foreground">
+          Last updated: {lastRefresh.toLocaleTimeString()}
+        </div>
+      )}
     </div>
   );
 }
