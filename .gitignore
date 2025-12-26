@@ -44,5 +44,6 @@ android/build
 !android/app/build.gradle
 
 # Secrets
+.env
 .env.local
 .env.production.local
