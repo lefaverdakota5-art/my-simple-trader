@@ -52,13 +52,17 @@ export type Database = {
       }
       bot_config: {
         Row: {
+          auto_approve_enabled: boolean | null
           cooldown_seconds: number | null
           created_at: string | null
+          dry_run: boolean | null
           id: string
           keep_usd_reserve: number | null
           kill_switch: boolean | null
           max_daily_loss_pct: number | null
           max_exposure_per_asset_pct: number | null
+          max_notional_per_order_usd: number | null
+          max_open_orders: number | null
           max_orders_per_tick: number | null
           mode: string | null
           pairs: string[] | null
@@ -68,15 +72,20 @@ export type Database = {
           trade_size_pct: number | null
           updated_at: string | null
           user_id: string
+          voting_enabled: boolean | null
         }
         Insert: {
+          auto_approve_enabled?: boolean | null
           cooldown_seconds?: number | null
           created_at?: string | null
+          dry_run?: boolean | null
           id?: string
           keep_usd_reserve?: number | null
           kill_switch?: boolean | null
           max_daily_loss_pct?: number | null
           max_exposure_per_asset_pct?: number | null
+          max_notional_per_order_usd?: number | null
+          max_open_orders?: number | null
           max_orders_per_tick?: number | null
           mode?: string | null
           pairs?: string[] | null
@@ -86,15 +95,20 @@ export type Database = {
           trade_size_pct?: number | null
           updated_at?: string | null
           user_id: string
+          voting_enabled?: boolean | null
         }
         Update: {
+          auto_approve_enabled?: boolean | null
           cooldown_seconds?: number | null
           created_at?: string | null
+          dry_run?: boolean | null
           id?: string
           keep_usd_reserve?: number | null
           kill_switch?: boolean | null
           max_daily_loss_pct?: number | null
           max_exposure_per_asset_pct?: number | null
+          max_notional_per_order_usd?: number | null
+          max_open_orders?: number | null
           max_orders_per_tick?: number | null
           mode?: string | null
           pairs?: string[] | null
@@ -104,6 +118,7 @@ export type Database = {
           trade_size_pct?: number | null
           updated_at?: string | null
           user_id?: string
+          voting_enabled?: boolean | null
         }
         Relationships: []
       }

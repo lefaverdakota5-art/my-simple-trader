@@ -1,4 +1,4 @@
-project_id = "whdljtbtqisoszbrzdwq"
+project_id = "pchaijknfmrddivqjesm"
 
 [functions.push-update]
 verify_jwt = false
@@ -10,4 +10,7 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.kraken-withdraw]
+verify_jwt = false
+
+[functions.execute-intents]
 verify_jwt = false

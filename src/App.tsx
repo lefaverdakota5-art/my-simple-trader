@@ -11,6 +11,7 @@ import Install from "./pages/Install";
 import Settings from "./pages/Settings";
 import BotSettings from "./pages/BotSettings";
 import CashOut from "./pages/CashOut";
+import Intents from "./pages/Intents";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -30,6 +31,7 @@ const App = () => (
           <Route path="/settings" element={<Settings />} />
           <Route path="/bot-settings" element={<BotSettings />} />
           <Route path="/cashout" element={<CashOut />} />
+          <Route path="/intents" element={<Intents />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>
