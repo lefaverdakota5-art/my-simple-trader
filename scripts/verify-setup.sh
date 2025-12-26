@@ -125,8 +125,10 @@ check_required_env_vars() {
         return
     fi
     
-    # Load .env file
-    export $(grep -v '^#' .env | xargs 2>/dev/null || true)
+    # Load .env file safely
+    set -a
+    source .env 2>/dev/null || true
+    set +a
     
     # Check required variables
     REQUIRED_VARS=(
@@ -321,7 +323,9 @@ check_api_config() {
     print_check "Checking API key configuration methods"
     
     if [ -f ".env" ]; then
-        export $(grep -v '^#' .env | xargs 2>/dev/null || true)
+        set -a
+        source .env 2>/dev/null || true
+        set +a
     fi
     
     # Check Alpaca
@@ -460,7 +464,7 @@ check_security() {
             print_fail "Possible OpenAI API key found in main.py"
         fi
         
-        if grep -q '"password":\s*"[^{]' main.py 2>/dev/null; then
+        if grep -q '"password":[[:space:]]*"[^{]' main.py 2>/dev/null; then
             print_warning "Possible hardcoded password in main.py"
         fi
         
