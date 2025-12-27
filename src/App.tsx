@@ -12,6 +12,8 @@ import Settings from "./pages/Settings";
 import BotSettings from "./pages/BotSettings";
 import CashOut from "./pages/CashOut";
 import Intents from "./pages/Intents";
+import IntentDetail from "./pages/IntentDetail";
+import Logs from "./pages/Logs";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -32,6 +34,8 @@ const App = () => (
           <Route path="/bot-settings" element={<BotSettings />} />
           <Route path="/cashout" element={<CashOut />} />
           <Route path="/intents" element={<Intents />} />
+          <Route path="/intents/:id" element={<IntentDetail />} />
+          <Route path="/logs" element={<Logs />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>
