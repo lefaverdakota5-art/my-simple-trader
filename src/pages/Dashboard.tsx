@@ -261,7 +261,14 @@ export default function Dashboard() {
       </div>
 
       {/* Action Buttons */}
-      <div className="grid grid-cols-3 gap-3 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+        <button
+          onClick={() => navigate('/intents')}
+          className="p-4 rounded-lg border-2 border-primary bg-primary/10 hover:bg-primary/20 font-semibold transition-all text-primary"
+        >
+          <Activity className="h-5 w-5 mx-auto mb-1" />
+          Trade Intents
+        </button>
         <button
           onClick={() => navigate('/bot-settings')}
           className="p-4 rounded-lg border-2 border-border bg-background hover:bg-muted font-semibold transition-all"

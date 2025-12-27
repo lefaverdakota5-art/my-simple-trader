@@ -27,6 +27,9 @@ export interface IntentVote {
   intent_id: string;
   user_id: string;
   vote: 'approve' | 'deny';
+  confidence: number | null;
+  rationale: string | null;
+  voter_type: string | null;
   created_at: string;
 }
 
@@ -106,7 +109,7 @@ export function useTradeIntents(userId: string | null) {
     };
   }, [userId, fetchIntents]);
 
-  const castVote = useCallback(async (intentId: string, vote: 'approve' | 'deny') => {
+  const castVote = useCallback(async (intentId: string, vote: 'approve' | 'deny', confidence: number = 1, rationale?: string) => {
     if (!userId) return false;
     
     setVoting(intentId);
@@ -126,6 +129,9 @@ export function useTradeIntents(userId: string | null) {
             intent_id: intentId,
             user_id: userId,
             vote,
+            confidence,
+            rationale,
+            voter_type: 'user',
           }),
         }
       );

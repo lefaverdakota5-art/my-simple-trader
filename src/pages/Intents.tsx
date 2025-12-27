@@ -11,9 +11,9 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Check, X, Clock, AlertTriangle, PlayCircle, Ban, RefreshCw, Plus, Settings, Home } from "lucide-react";
+import { Check, X, Clock, AlertTriangle, PlayCircle, Ban, RefreshCw, Plus, Settings, Home, FileText, Eye } from "lucide-react";
 import { toast } from "sonner";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 
 function getStatusBadge(status: string) {
   switch (status) {
@@ -38,6 +38,7 @@ function getStatusBadge(status: string) {
 
 export default function Intents() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const { intents, loading, voting, castVote, createIntent, cancelIntent, refresh } = useTradeIntents(user?.id || null);
   const { config, loading: configLoading, updateConfig, saving } = useBotConfig(user?.id || null);
   
@@ -143,6 +144,12 @@ export default function Intents() {
         <Button variant="outline" size="sm" asChild>
           <Link to="/dashboard"><Home className="h-4 w-4 mr-1" />Dashboard</Link>
         </Button>
+        <Button variant="outline" size="sm" asChild>
+          <Link to="/logs"><FileText className="h-4 w-4 mr-1" />Logs</Link>
+        </Button>
+        <Button variant="outline" size="sm" asChild>
+          <Link to="/settings"><Settings className="h-4 w-4 mr-1" />Settings</Link>
+        </Button>
       </div>
 
       {/* Bot Config Card */}
@@ -244,7 +251,7 @@ export default function Intents() {
             <Card><CardContent className="py-8 text-center text-muted-foreground">No pending intents</CardContent></Card>
           ) : (
             pendingIntents.map(intent => (
-              <Card key={intent.id}>
+                <Card key={intent.id} className="cursor-pointer hover:border-primary/50 transition-colors" onClick={() => navigate(`/intents/${intent.id}`)}>
                 <CardContent className="py-4">
                   <div className="flex items-center justify-between">
                     <div className="space-y-1">
@@ -264,7 +271,7 @@ export default function Intents() {
                         Votes: {intent.approve_votes} approve / {intent.deny_votes} deny (need {intent.approve_threshold})
                       </p>
                     </div>
-                    <div className="flex gap-2">
+                    <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
                       <Button
                         size="sm"
                         variant="outline"
