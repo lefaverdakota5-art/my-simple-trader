@@ -1,9 +1,20 @@
+
 fastapi
-uvicorn[standard]
-alpaca-py
+uvicorn
+alpaca-trade-api
 pykrakenapi
 krakenex
-polygon-api-client
+xmltodict
+xgboost
+transformers
 requests
+<<<<<<< HEAD
 openai>=1.0.0
 python-dotenv
+=======
+supabase
+numpy
+pandas
+scikit-learn
+aiohttp
+>>>>>>> 31468fb (Finalize Supabase/Railway integration and bulletproof webhook config)
