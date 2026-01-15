@@ -55,29 +55,6 @@ except ImportError:
     OpenAIClient = None  # type: ignore
     logger.warning("OpenAI package not installed, AI council will use deterministic voting")
 
-app = FastAPI(
-    title="AI Trader API",
-    description="Production-ready AI trading bot with ensemble learning",
-    version="1.3.0"
-)
-
-# Add gzip compression for responses
-app.add_middleware(GZipMiddleware, minimum_size=1000)
-
-# Request ID middleware for tracing
-@app.middleware("http")
-async def add_request_id(request: Request, call_next):
-    """Add request ID for tracing."""
-    request_id = request.headers.get("X-Request-ID", str(time.time()))
-    logger.info(f"Request: {request.method} {request.url.path} [ID: {request_id}]")
-    
-    try:
-        response = await call_next(request)
-        response.headers["X-Request-ID"] = request_id
-        return response
-    except Exception as e:
-        logger.error(f"Request failed [ID: {request_id}]: {e}")
-        raise
 
 
 
@@ -166,51 +143,6 @@ logger.info("Max Notional per Order: $%.2f", SETTINGS.max_notional_per_order_usd
 logger.info("Max Orders per Day: %d", SETTINGS.max_orders_per_day)
 logger.info("CORS Origins: %s", SETTINGS.cors_origins)
 logger.info("="*50)
-
-# Configure CORS
-if SETTINGS.cors_origins == ["*"]:
-    logger.warning("CORS configured to allow ALL origins - not recommended for production!")
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=False,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
-else:
-    logger.info("CORS configured with specific origins: %s", SETTINGS.cors_origins)
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=SETTINGS.cors_origins,
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
-
-
-# Global exception handler
-@app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception):
-    """Handle uncaught exceptions globally."""
-    logger.error(f"Unhandled exception for {request.url.path}: {exc}", exc_info=True)
-    return JSONResponse(
-        status_code=500,
-        content={
-            "error": "Internal server error",
-            "message": str(exc) if os.getenv("DEBUG") == "true" else "An unexpected error occurred",
-            "path": str(request.url.path)
-        }
-    )
-
-
-# Initialize AI modules as singletons
-ensemble_ai_instance = EnsembleAI()
-news_sentiment_instance = NewsSentiment()
-hft_instance = HighFrequencyTrader()
-arbitrage_instance = ArbitrageEngine()
-profit_maximizer_instance = ProfitMaximizer()
-
-logger.info("AI modules initialized successfully")
 
 
 def _db() -> sqlite3.Connection:
@@ -1199,10 +1131,98 @@ class BotManager:
 BOT_MANAGER = BotManager(settings=SETTINGS)
 
 
-@app.on_event("startup")
-async def _startup() -> None:
+# Use lifespan context manager for startup/shutdown
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app_instance: FastAPI):
+    """Application lifespan: startup and shutdown events."""
+    # Startup
+    logger.info("Starting AI Trader application")
     BOT_MANAGER.start()
-    asyncio.create_task(BOT_MANAGER.poll_forever())
+    bot_task = asyncio.create_task(BOT_MANAGER.poll_forever())
+    
+    yield
+    
+    # Shutdown
+    logger.info("Shutting down AI Trader application")
+    bot_task.cancel()
+    try:
+        await bot_task
+    except asyncio.CancelledError:
+        logger.info("Bot manager task cancelled successfully")
+
+
+# Now create the app with lifespan
+app = FastAPI(
+    title="AI Trader API",
+    description="Production-ready AI trading bot with ensemble learning",
+    version="1.3.0",
+    lifespan=lifespan
+)
+
+# Add gzip compression for responses
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+# Configure CORS
+if SETTINGS.cors_origins == ["*"]:
+    logger.warning("CORS configured to allow ALL origins - not recommended for production!")
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+else:
+    logger.info("CORS configured with specific origins: %s", SETTINGS.cors_origins)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=SETTINGS.cors_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+# Request ID middleware for tracing
+@app.middleware("http")
+async def add_request_id(request: Request, call_next):
+    """Add request ID for tracing."""
+    request_id = request.headers.get("X-Request-ID", str(time.time()))
+    logger.info(f"Request: {request.method} {request.url.path} [ID: {request_id}]")
+    
+    try:
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = request_id
+        return response
+    except Exception as e:
+        logger.error(f"Request failed [ID: {request_id}]: {e}")
+        raise
+
+
+# Global exception handler
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Handle uncaught exceptions globally."""
+    logger.error(f"Unhandled exception for {request.url.path}: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": "Internal server error",
+            "message": str(exc) if os.getenv("DEBUG") == "true" else "An unexpected error occurred",
+            "path": str(request.url.path)
+        }
+    )
+
+
+# Initialize AI modules as singletons
+ensemble_ai_instance = EnsembleAI()
+news_sentiment_instance = NewsSentiment()
+hft_instance = HighFrequencyTrader()
+arbitrage_instance = ArbitrageEngine()
+profit_maximizer_instance = ProfitMaximizer()
+
+logger.info("AI modules initialized successfully")
 
 
 @app.get("/health")
@@ -2128,19 +2148,60 @@ async def deposit_from_chime(
 
 
 @app.get("/ai/decision")
-async def ai_decision(symbol: str = "AAPL", headlines: list = None):
+async def ai_decision(symbol: str = "AAPL"):
     """
     Get AI trading decision for a symbol.
     
     Args:
         symbol: Stock/crypto symbol (e.g., "AAPL", "BTC")
-        headlines: Optional list of news headlines for sentiment analysis
         
     Returns:
         AI decision with confidence score
     """
     try:
         logger.info(f"AI decision requested for symbol: {symbol}")
+        
+        # Fetch sentiment (no headlines provided, will return neutral)
+        sentiment_score = news_sentiment_instance.fetch(symbol, None)
+        
+        # Placeholder market data (in production, fetch real data)
+        market_data = {
+            "symbol": symbol,
+            "current_price": 100,  # Would fetch from exchange API
+            "open_price": 98,
+            "high": 102,
+            "low": 97,
+            "volume": 1000000,
+            "avg_volume": 950000
+        }
+        
+        # Get ensemble AI decision
+        decision = ensemble_ai_instance.predict(market_data, news_sentiment=sentiment_score)
+        
+        logger.info(f"AI decision for {symbol}: {decision.get('final_decision')}")
+        return {"symbol": symbol, "decision": decision, "sentiment": sentiment_score}
+        
+    except Exception as e:
+        logger.error(f"Error getting AI decision for {symbol}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/ai/decision")
+async def ai_decision_with_headlines(body: dict):
+    """
+    Get AI trading decision for a symbol with optional news headlines.
+    
+    Args:
+        body: JSON with symbol and optional headlines list
+        
+    Returns:
+        AI decision with confidence score
+    """
+    try:
+        symbol = body.get("symbol", "AAPL")
+        headlines = body.get("headlines", None)
+        
+        logger.info(f"AI decision requested for symbol: {symbol} with {len(headlines) if headlines else 0} headlines")
         
         # Fetch sentiment
         sentiment_score = news_sentiment_instance.fetch(symbol, headlines)
@@ -2163,7 +2224,7 @@ async def ai_decision(symbol: str = "AAPL", headlines: list = None):
         return {"symbol": symbol, "decision": decision, "sentiment": sentiment_score}
         
     except Exception as e:
-        logger.error(f"Error getting AI decision for {symbol}: {e}")
+        logger.error(f"Error getting AI decision: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
