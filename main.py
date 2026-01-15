@@ -2,20 +2,37 @@ import asyncio
 import os
 import sqlite3
 import time
+import logging
+import sys
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
+
+# Configure logging before anything else
+logging.basicConfig(
+    level=logging.INFO if os.getenv("DEBUG") != "true" else logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler("app.log") if os.getenv("LOG_FILE") == "true" else logging.NullHandler()
+    ]
+)
+
+logger = logging.getLogger(__name__)
 
 try:
     # Optional convenience for local runs (does nothing if not installed / no .env).
     from dotenv import load_dotenv  # type: ignore
     load_dotenv()
+    logger.info("Environment variables loaded from .env file")
 except ImportError:
+    logger.info("python-dotenv not installed, using environment variables only")
     pass
 
 import requests
-from fastapi import FastAPI, Header
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 import krakenex
 from pykrakenapi import KrakenAPI
@@ -36,8 +53,32 @@ try:
     from openai import OpenAI as OpenAIClient
 except ImportError:
     OpenAIClient = None  # type: ignore
+    logger.warning("OpenAI package not installed, AI council will use deterministic voting")
 
-app = FastAPI()
+app = FastAPI(
+    title="AI Trader API",
+    description="Production-ready AI trading bot with ensemble learning",
+    version="1.3.0"
+)
+
+# Add gzip compression for responses
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+# Request ID middleware for tracing
+@app.middleware("http")
+async def add_request_id(request: Request, call_next):
+    """Add request ID for tracing."""
+    request_id = request.headers.get("X-Request-ID", str(time.time()))
+    logger.info(f"Request: {request.method} {request.url.path} [ID: {request_id}]")
+    
+    try:
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = request_id
+        return response
+    except Exception as e:
+        logger.error(f"Request failed [ID: {request_id}]: {e}")
+        raise
+
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -116,7 +157,19 @@ class Settings:
 
 SETTINGS = Settings()
 
+# Log startup configuration
+logger.info("="*50)
+logger.info("AI Trader starting up")
+logger.info("Trading Mode: %s", SETTINGS.trading_mode)
+logger.info("Alpaca Paper: %s", SETTINGS.alpaca_paper)
+logger.info("Max Notional per Order: $%.2f", SETTINGS.max_notional_per_order_usd)
+logger.info("Max Orders per Day: %d", SETTINGS.max_orders_per_day)
+logger.info("CORS Origins: %s", SETTINGS.cors_origins)
+logger.info("="*50)
+
+# Configure CORS
 if SETTINGS.cors_origins == ["*"]:
+    logger.warning("CORS configured to allow ALL origins - not recommended for production!")
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
@@ -125,6 +178,7 @@ if SETTINGS.cors_origins == ["*"]:
         allow_headers=["*"],
     )
 else:
+    logger.info("CORS configured with specific origins: %s", SETTINGS.cors_origins)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=SETTINGS.cors_origins,
@@ -132,6 +186,31 @@ else:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+
+# Global exception handler
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Handle uncaught exceptions globally."""
+    logger.error(f"Unhandled exception for {request.url.path}: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": "Internal server error",
+            "message": str(exc) if os.getenv("DEBUG") == "true" else "An unexpected error occurred",
+            "path": str(request.url.path)
+        }
+    )
+
+
+# Initialize AI modules as singletons
+ensemble_ai_instance = EnsembleAI()
+news_sentiment_instance = NewsSentiment()
+hft_instance = HighFrequencyTrader()
+arbitrage_instance = ArbitrageEngine()
+profit_maximizer_instance = ProfitMaximizer()
+
+logger.info("AI modules initialized successfully")
 
 
 def _db() -> sqlite3.Connection:
@@ -492,7 +571,7 @@ class PushUpdateClient:
             r.raise_for_status()
         except Exception as e:
             # Don't crash bots due to telemetry issues
-            print(f"[push-update] failed: {e}")
+            logger.warning(f"[push-update] failed: {e}")
 
 
 class SupabaseAdmin:
@@ -640,7 +719,7 @@ Format: YES: [reason] or NO: [reason]
         return f"{yes_count}/5", reasons, approved
         
     except Exception as e:
-        print(f"[openai-council] Error: {e}. Falling back to deterministic voting.")
+        logger.warning(f"[openai-council] Error: {e}. Falling back to deterministic voting.")
         return _council_vote_from_price_change(pct_change, orders_left)
 
 
@@ -2049,32 +2128,123 @@ async def deposit_from_chime(
 
 
 @app.get("/ai/decision")
-async def ai_decision(symbol: str = "AAPL"):
-    # Example: Use ensemble AI and news sentiment for a decision
-    sentiment_score = news_sentiment.fetch(symbol)
-    market_data = {"symbol": symbol, "price": 100}  # Placeholder
-    decision = ensemble_ai.predict(market_data, news_sentiment=sentiment_score)
-    return {"decision": decision}
+async def ai_decision(symbol: str = "AAPL", headlines: list = None):
+    """
+    Get AI trading decision for a symbol.
+    
+    Args:
+        symbol: Stock/crypto symbol (e.g., "AAPL", "BTC")
+        headlines: Optional list of news headlines for sentiment analysis
+        
+    Returns:
+        AI decision with confidence score
+    """
+    try:
+        logger.info(f"AI decision requested for symbol: {symbol}")
+        
+        # Fetch sentiment
+        sentiment_score = news_sentiment_instance.fetch(symbol, headlines)
+        
+        # Placeholder market data (in production, fetch real data)
+        market_data = {
+            "symbol": symbol,
+            "current_price": 100,  # Would fetch from exchange API
+            "open_price": 98,
+            "high": 102,
+            "low": 97,
+            "volume": 1000000,
+            "avg_volume": 950000
+        }
+        
+        # Get ensemble AI decision
+        decision = ensemble_ai_instance.predict(market_data, news_sentiment=sentiment_score)
+        
+        logger.info(f"AI decision for {symbol}: {decision.get('final_decision')}")
+        return {"symbol": symbol, "decision": decision, "sentiment": sentiment_score}
+        
+    except Exception as e:
+        logger.error(f"Error getting AI decision for {symbol}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.post("/hft/execute")
-async def hft_execute(symbol: str, amount: float, side: str):
-    result = hft.execute(symbol, amount, side)
-    return result
+async def hft_execute(body: dict):
+    """
+    Execute high-frequency trade.
+    
+    Args:
+        body: JSON with symbol, amount, and side
+        
+    Returns:
+        Execution result
+    """
+    try:
+        symbol = body.get("symbol", "")
+        amount = float(body.get("amount", 0))
+        side = body.get("side", "")
+        
+        logger.info(f"HFT execute request: {side} {symbol} ${amount}")
+        
+        result = hft_instance.execute(symbol, amount, side)
+        return result
+        
+    except Exception as e:
+        logger.error(f"HFT execution error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/arbitrage/check")
-async def arbitrage_check():
-    prices = {"kraken": 100, "binance": 101, "coinbase": 99.5, "kucoin": 100.2}  # Placeholder
-    opportunity = arbitrage.find_opportunity(prices)
-    if opportunity:
-        execution = arbitrage.execute(opportunity)
-        return execution
-    return {"status": "no_opportunity"}
+async def arbitrage_check(prices: dict = None):
+    """
+    Check for arbitrage opportunities.
+    
+    Args:
+        prices: Optional dict of exchange prices (e.g., {"kraken": 100, "binance": 101})
+        
+    Returns:
+        Arbitrage opportunity if found
+    """
+    try:
+        # Use provided prices or fetch from exchanges (placeholder)
+        if not prices:
+            prices = {"kraken": 100, "binance": 101, "coinbase": 99.5, "kucoin": 100.2}
+        
+        logger.info("Checking arbitrage opportunities across exchanges")
+        
+        opportunity = arbitrage_instance.find_opportunity(prices)
+        if opportunity:
+            execution = arbitrage_instance.execute(opportunity)
+            return execution
+        
+        return {"status": "no_opportunity", "message": "No profitable arbitrage found"}
+        
+    except Exception as e:
+        logger.error(f"Arbitrage check error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.post("/profit/allocate")
-async def profit_allocate(performance: dict):
-    allocation = profit_maximizer.allocate(performance)
-    return allocation
-
+async def profit_allocate(body: dict):
+    """
+    Calculate optimal profit allocation.
+    
+    Args:
+        body: JSON with performance data for each asset/bot
+        
+    Returns:
+        Allocation recommendations
+    """
+    try:
+        performance = body.get("performance", {})
+        
+        logger.info(f"Calculating profit allocation for {len(performance)} assets")
+        
+        allocation = profit_maximizer_instance.allocate(performance)
+        return allocation
+        
+    except Exception as e:
+        logger.error(f"Profit allocation error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":
