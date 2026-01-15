@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 import asyncio
 import os
 import sqlite3
@@ -10,19 +9,24 @@ from typing import Any
 try:
     # Optional convenience for local runs (does nothing if not installed / no .env).
     from dotenv import load_dotenv  # type: ignore
-
     load_dotenv()
-import os
-import asyncio
+except ImportError:
+    pass
+
 import requests
-from fastapi import FastAPI
+from fastapi import FastAPI, Header
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 import krakenex
 from pykrakenapi import KrakenAPI
+from alpaca.trading.client import TradingClient
+from alpaca.trading.requests import MarketOrderRequest
+from alpaca.trading.enums import OrderSide, TimeInForce
+from alpaca.data.historical import StockHistoricalDataClient
+from alpaca.data.requests import StockLatestQuoteRequest, StockLatestBarRequest
+
 from src.ai_modules.ensemble_ai import EnsembleAI
 from src.ai_modules.news_sentiment import NewsSentiment
-from src.ai_modules.hft import HighFrequencyTrader
-from src.ai_modules.arbitrage import ArbitrageEngine
-from src.ai_modules.profit_maximizer import ProfitMaximizer
 from src.ai_modules.hft import HighFrequencyTrader
 from src.ai_modules.arbitrage import ArbitrageEngine
 from src.ai_modules.profit_maximizer import ProfitMaximizer
@@ -36,7 +40,6 @@ except ImportError:
 app = FastAPI()
 
 
-<<<<<<< HEAD
 def _env_bool(name: str, default: bool) -> bool:
     raw = os.getenv(name)
     if raw is None:
@@ -483,47 +486,6 @@ class PushUpdateClient:
             "council_reasons": council_reasons,
             "withdraw_status": withdraw_status,
         }
-=======
-
-KRAKEN_KEY = os.getenv("KRAKEN_KEY")
-KRAKEN_SECRET = os.getenv("KRAKEN_SECRET")
-k = krakenex.API(key=KRAKEN_KEY, secret=KRAKEN_SECRET)
-kraken = KrakenAPI(k)
-
-def get_supabase_webhook_url() -> str:
-    url = (
-        os.getenv("SUPABASE_WEBHOOK")
-        or os.getenv("SUPABASE_PUSH_UPDATE_URL")
-        or ""
-    ).strip()
-    if not url:
-        raise RuntimeError("Missing SUPABASE_WEBHOOK (or SUPABASE_PUSH_UPDATE_URL).")
-    if not url.startswith("https://"):
-        raise RuntimeError("Supabase webhook URL must start with https://")
-    return url
-
-# Initialize advanced modules
-ensemble_ai = EnsembleAI()
-news_sentiment = NewsSentiment()
-hft = HighFrequencyTrader()
-arbitrage = ArbitrageEngine()
-profit_maximizer = ProfitMaximizer()
-
-def send_update(message):
-    try:
-        webhook_url = get_supabase_webhook_url()
-        requests.post(webhook_url, json={
-            "new_trade": message,
-            "balance": "Live",
-            "today_pl": "+0.00",
-            "council_votes": "Running",
-            "council_reasons": ["Bot active 24/7"]
-        })
-    except Exception as e:
-        print(f"[WARN] Could not send update to Supabase webhook: {e}")
-
-
->>>>>>> 31468fb (Finalize Supabase/Railway integration and bulletproof webhook config)
 
         try:
             r = requests.post(self._url, json=payload, headers=headers, timeout=10)
@@ -2114,12 +2076,8 @@ async def profit_allocate(performance: dict):
     return allocation
 
 
+
 if __name__ == "__main__":
-<<<<<<< HEAD
-=======
-    loop = asyncio.get_event_loop()
-    loop.create_task(crypto_bot())
->>>>>>> 31468fb (Finalize Supabase/Railway integration and bulletproof webhook config)
     import uvicorn
 
     uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", "8000")))
