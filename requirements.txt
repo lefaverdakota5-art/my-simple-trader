@@ -1,6 +1,7 @@
 
 fastapi
 uvicorn
+python-multipart
 alpaca-trade-api
 pykrakenapi
 krakenex
@@ -8,13 +9,16 @@ xmltodict
 xgboost
 transformers
 requests
-<<<<<<< HEAD
 openai>=1.0.0
 python-dotenv
-=======
 supabase
 numpy
 pandas
 scikit-learn
 aiohttp
->>>>>>> 31468fb (Finalize Supabase/Railway integration and bulletproof webhook config)
+torch
+torchvision
+torchaudio
+tensorflow
+python-dateutil
+pytz

@@ -1,28 +1,49 @@
-<<<<<<< HEAD
 import asyncio
 import os
 import sqlite3
 import time
+import logging
+import sys
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+# Configure logging before anything else
+logging.basicConfig(
+    level=logging.INFO if os.getenv("DEBUG") != "true" else logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler("app.log") if os.getenv("LOG_FILE") == "true" else logging.NullHandler()
+    ]
+)
+
+logger = logging.getLogger(__name__)
+
 try:
     # Optional convenience for local runs (does nothing if not installed / no .env).
     from dotenv import load_dotenv  # type: ignore
-
     load_dotenv()
-import os
-import asyncio
+    logger.info("Environment variables loaded from .env file")
+except ImportError:
+    logger.info("python-dotenv not installed, using environment variables only")
+    pass
+
 import requests
-from fastapi import FastAPI
+from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import JSONResponse
 import krakenex
 from pykrakenapi import KrakenAPI
+from alpaca.trading.client import TradingClient
+from alpaca.trading.requests import MarketOrderRequest
+from alpaca.trading.enums import OrderSide, TimeInForce
+from alpaca.data.historical import StockHistoricalDataClient
+from alpaca.data.requests import StockLatestQuoteRequest, StockLatestBarRequest
+
 from src.ai_modules.ensemble_ai import EnsembleAI
 from src.ai_modules.news_sentiment import NewsSentiment
-from src.ai_modules.hft import HighFrequencyTrader
-from src.ai_modules.arbitrage import ArbitrageEngine
-from src.ai_modules.profit_maximizer import ProfitMaximizer
 from src.ai_modules.hft import HighFrequencyTrader
 from src.ai_modules.arbitrage import ArbitrageEngine
 from src.ai_modules.profit_maximizer import ProfitMaximizer
@@ -32,11 +53,11 @@ try:
     from openai import OpenAI as OpenAIClient
 except ImportError:
     OpenAIClient = None  # type: ignore
+    logger.warning("OpenAI package not installed, AI council will use deterministic voting")
 
-app = FastAPI()
 
 
-<<<<<<< HEAD
+
 def _env_bool(name: str, default: bool) -> bool:
     raw = os.getenv(name)
     if raw is None:
@@ -113,22 +134,15 @@ class Settings:
 
 SETTINGS = Settings()
 
-if SETTINGS.cors_origins == ["*"]:
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=False,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
-else:
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=SETTINGS.cors_origins,
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+# Log startup configuration
+logger.info("="*50)
+logger.info("AI Trader starting up")
+logger.info("Trading Mode: %s", SETTINGS.trading_mode)
+logger.info("Alpaca Paper: %s", SETTINGS.alpaca_paper)
+logger.info("Max Notional per Order: $%.2f", SETTINGS.max_notional_per_order_usd)
+logger.info("Max Orders per Day: %d", SETTINGS.max_orders_per_day)
+logger.info("CORS Origins: %s", SETTINGS.cors_origins)
+logger.info("="*50)
 
 
 def _db() -> sqlite3.Connection:
@@ -483,54 +497,13 @@ class PushUpdateClient:
             "council_reasons": council_reasons,
             "withdraw_status": withdraw_status,
         }
-=======
-
-KRAKEN_KEY = os.getenv("KRAKEN_KEY")
-KRAKEN_SECRET = os.getenv("KRAKEN_SECRET")
-k = krakenex.API(key=KRAKEN_KEY, secret=KRAKEN_SECRET)
-kraken = KrakenAPI(k)
-
-def get_supabase_webhook_url() -> str:
-    url = (
-        os.getenv("SUPABASE_WEBHOOK")
-        or os.getenv("SUPABASE_PUSH_UPDATE_URL")
-        or ""
-    ).strip()
-    if not url:
-        raise RuntimeError("Missing SUPABASE_WEBHOOK (or SUPABASE_PUSH_UPDATE_URL).")
-    if not url.startswith("https://"):
-        raise RuntimeError("Supabase webhook URL must start with https://")
-    return url
-
-# Initialize advanced modules
-ensemble_ai = EnsembleAI()
-news_sentiment = NewsSentiment()
-hft = HighFrequencyTrader()
-arbitrage = ArbitrageEngine()
-profit_maximizer = ProfitMaximizer()
-
-def send_update(message):
-    try:
-        webhook_url = get_supabase_webhook_url()
-        requests.post(webhook_url, json={
-            "new_trade": message,
-            "balance": "Live",
-            "today_pl": "+0.00",
-            "council_votes": "Running",
-            "council_reasons": ["Bot active 24/7"]
-        })
-    except Exception as e:
-        print(f"[WARN] Could not send update to Supabase webhook: {e}")
-
-
->>>>>>> 31468fb (Finalize Supabase/Railway integration and bulletproof webhook config)
 
         try:
             r = requests.post(self._url, json=payload, headers=headers, timeout=10)
             r.raise_for_status()
         except Exception as e:
             # Don't crash bots due to telemetry issues
-            print(f"[push-update] failed: {e}")
+            logger.warning(f"[push-update] failed: {e}")
 
 
 class SupabaseAdmin:
@@ -678,7 +651,7 @@ Format: YES: [reason] or NO: [reason]
         return f"{yes_count}/5", reasons, approved
         
     except Exception as e:
-        print(f"[openai-council] Error: {e}. Falling back to deterministic voting.")
+        logger.warning(f"[openai-council] Error: {e}. Falling back to deterministic voting.")
         return _council_vote_from_price_change(pct_change, orders_left)
 
 
@@ -1158,10 +1131,98 @@ class BotManager:
 BOT_MANAGER = BotManager(settings=SETTINGS)
 
 
-@app.on_event("startup")
-async def _startup() -> None:
+# Use lifespan context manager for startup/shutdown
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app_instance: FastAPI):
+    """Application lifespan: startup and shutdown events."""
+    # Startup
+    logger.info("Starting AI Trader application")
     BOT_MANAGER.start()
-    asyncio.create_task(BOT_MANAGER.poll_forever())
+    bot_task = asyncio.create_task(BOT_MANAGER.poll_forever())
+    
+    yield
+    
+    # Shutdown
+    logger.info("Shutting down AI Trader application")
+    bot_task.cancel()
+    try:
+        await bot_task
+    except asyncio.CancelledError:
+        logger.info("Bot manager task cancelled successfully")
+
+
+# Now create the app with lifespan
+app = FastAPI(
+    title="AI Trader API",
+    description="Production-ready AI trading bot with ensemble learning",
+    version="1.3.0",
+    lifespan=lifespan
+)
+
+# Add gzip compression for responses
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+# Configure CORS
+if SETTINGS.cors_origins == ["*"]:
+    logger.warning("CORS configured to allow ALL origins - not recommended for production!")
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+else:
+    logger.info("CORS configured with specific origins: %s", SETTINGS.cors_origins)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=SETTINGS.cors_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+# Request ID middleware for tracing
+@app.middleware("http")
+async def add_request_id(request: Request, call_next):
+    """Add request ID for tracing."""
+    request_id = request.headers.get("X-Request-ID", str(time.time()))
+    logger.info(f"Request: {request.method} {request.url.path} [ID: {request_id}]")
+    
+    try:
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = request_id
+        return response
+    except Exception as e:
+        logger.error(f"Request failed [ID: {request_id}]: {e}")
+        raise
+
+
+# Global exception handler
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Handle uncaught exceptions globally."""
+    logger.error(f"Unhandled exception for {request.url.path}: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": "Internal server error",
+            "message": str(exc) if os.getenv("DEBUG") == "true" else "An unexpected error occurred",
+            "path": str(request.url.path)
+        }
+    )
+
+
+# Initialize AI modules as singletons
+ensemble_ai_instance = EnsembleAI()
+news_sentiment_instance = NewsSentiment()
+hft_instance = HighFrequencyTrader()
+arbitrage_instance = ArbitrageEngine()
+profit_maximizer_instance = ProfitMaximizer()
+
+logger.info("AI modules initialized successfully")
 
 
 @app.get("/health")
@@ -2088,38 +2149,166 @@ async def deposit_from_chime(
 
 @app.get("/ai/decision")
 async def ai_decision(symbol: str = "AAPL"):
-    # Example: Use ensemble AI and news sentiment for a decision
-    sentiment_score = news_sentiment.fetch(symbol)
-    market_data = {"symbol": symbol, "price": 100}  # Placeholder
-    decision = ensemble_ai.predict(market_data, news_sentiment=sentiment_score)
-    return {"decision": decision}
+    """
+    Get AI trading decision for a symbol.
+    
+    Args:
+        symbol: Stock/crypto symbol (e.g., "AAPL", "BTC")
+        
+    Returns:
+        AI decision with confidence score
+    """
+    try:
+        logger.info(f"AI decision requested for symbol: {symbol}")
+        
+        # Fetch sentiment (no headlines provided, will return neutral)
+        sentiment_score = news_sentiment_instance.fetch(symbol, None)
+        
+        # Placeholder market data (in production, fetch real data)
+        market_data = {
+            "symbol": symbol,
+            "current_price": 100,  # Would fetch from exchange API
+            "open_price": 98,
+            "high": 102,
+            "low": 97,
+            "volume": 1000000,
+            "avg_volume": 950000
+        }
+        
+        # Get ensemble AI decision
+        decision = ensemble_ai_instance.predict(market_data, news_sentiment=sentiment_score)
+        
+        logger.info(f"AI decision for {symbol}: {decision.get('final_decision')}")
+        return {"symbol": symbol, "decision": decision, "sentiment": sentiment_score}
+        
+    except Exception as e:
+        logger.error(f"Error getting AI decision for {symbol}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/ai/decision")
+async def ai_decision_with_headlines(body: dict):
+    """
+    Get AI trading decision for a symbol with optional news headlines.
+    
+    Args:
+        body: JSON with symbol and optional headlines list
+        
+    Returns:
+        AI decision with confidence score
+    """
+    try:
+        symbol = body.get("symbol", "AAPL")
+        headlines = body.get("headlines", None)
+        
+        logger.info(f"AI decision requested for symbol: {symbol} with {len(headlines) if headlines else 0} headlines")
+        
+        # Fetch sentiment
+        sentiment_score = news_sentiment_instance.fetch(symbol, headlines)
+        
+        # Placeholder market data (in production, fetch real data)
+        market_data = {
+            "symbol": symbol,
+            "current_price": 100,  # Would fetch from exchange API
+            "open_price": 98,
+            "high": 102,
+            "low": 97,
+            "volume": 1000000,
+            "avg_volume": 950000
+        }
+        
+        # Get ensemble AI decision
+        decision = ensemble_ai_instance.predict(market_data, news_sentiment=sentiment_score)
+        
+        logger.info(f"AI decision for {symbol}: {decision.get('final_decision')}")
+        return {"symbol": symbol, "decision": decision, "sentiment": sentiment_score}
+        
+    except Exception as e:
+        logger.error(f"Error getting AI decision: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.post("/hft/execute")
-async def hft_execute(symbol: str, amount: float, side: str):
-    result = hft.execute(symbol, amount, side)
-    return result
+async def hft_execute(body: dict):
+    """
+    Execute high-frequency trade.
+    
+    Args:
+        body: JSON with symbol, amount, and side
+        
+    Returns:
+        Execution result
+    """
+    try:
+        symbol = body.get("symbol", "")
+        amount = float(body.get("amount", 0))
+        side = body.get("side", "")
+        
+        logger.info(f"HFT execute request: {side} {symbol} ${amount}")
+        
+        result = hft_instance.execute(symbol, amount, side)
+        return result
+        
+    except Exception as e:
+        logger.error(f"HFT execution error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/arbitrage/check")
-async def arbitrage_check():
-    prices = {"kraken": 100, "binance": 101, "coinbase": 99.5, "kucoin": 100.2}  # Placeholder
-    opportunity = arbitrage.find_opportunity(prices)
-    if opportunity:
-        execution = arbitrage.execute(opportunity)
-        return execution
-    return {"status": "no_opportunity"}
+async def arbitrage_check(prices: dict = None):
+    """
+    Check for arbitrage opportunities.
+    
+    Args:
+        prices: Optional dict of exchange prices (e.g., {"kraken": 100, "binance": 101})
+        
+    Returns:
+        Arbitrage opportunity if found
+    """
+    try:
+        # Use provided prices or fetch from exchanges (placeholder)
+        if not prices:
+            prices = {"kraken": 100, "binance": 101, "coinbase": 99.5, "kucoin": 100.2}
+        
+        logger.info("Checking arbitrage opportunities across exchanges")
+        
+        opportunity = arbitrage_instance.find_opportunity(prices)
+        if opportunity:
+            execution = arbitrage_instance.execute(opportunity)
+            return execution
+        
+        return {"status": "no_opportunity", "message": "No profitable arbitrage found"}
+        
+    except Exception as e:
+        logger.error(f"Arbitrage check error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.post("/profit/allocate")
-async def profit_allocate(performance: dict):
-    allocation = profit_maximizer.allocate(performance)
-    return allocation
+async def profit_allocate(body: dict):
+    """
+    Calculate optimal profit allocation.
+    
+    Args:
+        body: JSON with performance data for each asset/bot
+        
+    Returns:
+        Allocation recommendations
+    """
+    try:
+        performance = body.get("performance", {})
+        
+        logger.info(f"Calculating profit allocation for {len(performance)} assets")
+        
+        allocation = profit_maximizer_instance.allocate(performance)
+        return allocation
+        
+    except Exception as e:
+        logger.error(f"Profit allocation error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":
-<<<<<<< HEAD
-=======
-    loop = asyncio.get_event_loop()
-    loop.create_task(crypto_bot())
->>>>>>> 31468fb (Finalize Supabase/Railway integration and bulletproof webhook config)
     import uvicorn
 
     uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", "8000")))

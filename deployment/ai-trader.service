@@ -1,0 +1,26 @@
+[Unit]
+Description=AI Trader FastAPI Application
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/ai-trader
+Environment="PATH=/var/www/ai-trader/venv/bin"
+EnvironmentFile=/var/www/ai-trader/.env.production
+ExecStart=/var/www/ai-trader/venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000 --workers 4
+Restart=always
+RestartSec=10
+StandardOutput=append:/var/log/ai-trader/app.log
+StandardError=append:/var/log/ai-trader/error.log
+
+# Security
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/www/ai-trader/data /var/log/ai-trader
+
+[Install]
+WantedBy=multi-user.target
