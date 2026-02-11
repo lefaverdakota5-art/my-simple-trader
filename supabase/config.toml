@@ -14,3 +14,6 @@ verify_jwt = false
 
 [functions.execute-intents]
 verify_jwt = false
+
+[functions.plaid]
+verify_jwt = false

@@ -14,12 +14,12 @@ This guide will walk you through setting up the complete AI Simple Trader applic
 
 ### 1.1 Getting Your Supabase Keys
 
-Your Supabase project is already set up with ID: `whdljtbtqisoszbrzdwq`
+Your Supabase project is already set up with ID: `pchaijknfmrddivqjesm`
 
-1. **Go to Supabase Dashboard**: https://supabase.com/dashboard/project/whdljtbtqisoszbrzdwq
+1. **Go to Supabase Dashboard**: https://supabase.com/dashboard/project/pchaijknfmrddivqjesm
 2. **Navigate to**: Settings → API
 3. **Copy the following keys**:
-   - **Project URL**: `https://whdljtbtqisoszbrzdwq.supabase.co`
+   - **Project URL**: `https://pchaijknfmrddivqjesm.supabase.co`
    - **anon/public key**: This is your `VITE_SUPABASE_PUBLISHABLE_KEY`
    - **service_role key**: This is your `SUPABASE_SERVICE_ROLE_KEY` (⚠️ **NEVER** expose this on frontend!)
 
@@ -81,11 +81,11 @@ npx supabase functions list
 ```
 
 **Edge Function URLs**:
-- `push-update`: `https://whdljtbtqisoszbrzdwq.supabase.co/functions/v1/push-update`
-- `bot-actions`: `https://whdljtbtqisoszbrzdwq.supabase.co/functions/v1/bot-actions`
-- `bot-tick`: `https://whdljtbtqisoszbrzdwq.supabase.co/functions/v1/bot-tick`
-- `kraken-withdraw`: `https://whdljtbtqisoszbrzdwq.supabase.co/functions/v1/kraken-withdraw`
-- `plaid`: `https://whdljtbtqisoszbrzdwq.supabase.co/functions/v1/plaid`
+- `push-update`: `https://pchaijknfmrddivqjesm.supabase.co/functions/v1/push-update`
+- `bot-actions`: `https://pchaijknfmrddivqjesm.supabase.co/functions/v1/bot-actions`
+- `bot-tick`: `https://pchaijknfmrddivqjesm.supabase.co/functions/v1/bot-tick`
+- `kraken-withdraw`: `https://pchaijknfmrddivqjesm.supabase.co/functions/v1/kraken-withdraw`
+- `plaid`: `https://pchaijknfmrddivqjesm.supabase.co/functions/v1/plaid`
 
 ---
 
@@ -106,15 +106,15 @@ In Railway Dashboard → Your Project → Variables, add the following:
 
 ```bash
 # Supabase Configuration (REQUIRED)
-SUPABASE_URL=https://whdljtbtqisoszbrzdwq.supabase.co
+SUPABASE_URL=https://pchaijknfmrddivqjesm.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=your_service_role_key_here
-SUPABASE_PUSH_UPDATE_URL=https://whdljtbtqisoszbrzdwq.supabase.co/functions/v1/push-update
+SUPABASE_PUSH_UPDATE_URL=https://pchaijknfmrddivqjesm.supabase.co/functions/v1/push-update
 SUPABASE_WEBHOOK_SECRET=your_webhook_secret_here
 
 # Frontend Supabase Config (for environment reuse)
-VITE_SUPABASE_URL=https://whdljtbtqisoszbrzdwq.supabase.co
+VITE_SUPABASE_URL=https://pchaijknfmrddivqjesm.supabase.co
 VITE_SUPABASE_PUBLISHABLE_KEY=your_anon_key_here
-VITE_SUPABASE_PROJECT_ID=whdljtbtqisoszbrzdwq
+VITE_SUPABASE_PROJECT_ID=pchaijknfmrddivqjesm
 
 # Trading Mode
 TRADING_MODE=paper  # paper|dry_run|live (start with paper!)
@@ -297,7 +297,7 @@ When deploying the frontend to Vercel, add environment variables in the **Vercel
 
 | Name                               | Value                              | Environment     |
 |------------------------------------|------------------------------------|-----------------|
-| `VITE_SUPABASE_URL`               | `https://whdljtbtqisoszbrzdwq.supabase.co` | All |
+| `VITE_SUPABASE_URL`               | `https://pchaijknfmrddivqjesm.supabase.co` | All |
 | `VITE_SUPABASE_PUBLISHABLE_KEY`   | Your Supabase anon/public key      | All             |
 
 > **Important:** The OpenAI API key is a **backend secret** — it should **not** be added to Vercel as a `VITE_` prefixed variable because that would expose it in the browser. The frontend never calls OpenAI directly; it goes through the backend (Railway) or Supabase Edge Functions.
@@ -311,7 +311,7 @@ npx supabase secrets set OPENAI_API_KEY=sk-...your_key_here
 ```
 
 Or via the Supabase Dashboard:
-1. Go to: https://supabase.com/dashboard/project/whdljtbtqisoszbrzdwq
+1. Go to: https://supabase.com/dashboard/project/pchaijknfmrddivqjesm
 2. Navigate to: **Edge Functions** → **Settings** → **Secrets**
 3. Add: `OPENAI_API_KEY` = your key
 
@@ -373,20 +373,20 @@ The script checks:
 **Method 1: Browser**
 ```bash
 # Open Supabase dashboard
-open https://supabase.com/dashboard/project/whdljtbtqisoszbrzdwq
+open https://supabase.com/dashboard/project/pchaijknfmrddivqjesm
 ```
 
 **Method 2: API Test**
 ```bash
 # Test auth endpoint
-curl https://whdljtbtqisoszbrzdwq.supabase.co/rest/v1/ \
+curl https://pchaijknfmrddivqjesm.supabase.co/rest/v1/ \
   -H "apikey: YOUR_ANON_KEY"
 ```
 
 **Method 3: Edge Function Test**
 ```bash
 # Test push-update function
-curl -X POST https://whdljtbtqisoszbrzdwq.supabase.co/functions/v1/push-update \
+curl -X POST https://pchaijknfmrddivqjesm.supabase.co/functions/v1/push-update \
   -H "Content-Type: application/json" \
   -d '{"user_id":"test","balance":100}'
 ```
@@ -446,9 +446,9 @@ curl https://your-app.up.railway.app/me/status \
 
 1. **Update frontend .env**:
    ```bash
-   VITE_SUPABASE_URL=https://whdljtbtqisoszbrzdwq.supabase.co
+   VITE_SUPABASE_URL=https://pchaijknfmrddivqjesm.supabase.co
    VITE_SUPABASE_PUBLISHABLE_KEY=your_anon_key
-   VITE_SUPABASE_PROJECT_ID=whdljtbtqisoszbrzdwq
+   VITE_SUPABASE_PROJECT_ID=pchaijknfmrddivqjesm
    ```
 
 2. **Start dev server**:
