@@ -159,24 +159,24 @@ function council(pct: number, ordersLeft: boolean) {
   return { votes: `${yes}/5`, reasons, approved: yes >= 2 }; // 2/5 = 40% approval for AGGRESSIVE trading
 }
 
-// Generic AI vote helper - uses Lovable AI (no API key needed)
-async function lovableAiVote(opts: {
+// Generic AI vote helper - uses AI Gateway
+async function aiGatewayVote(opts: {
   name: string;
   systemPrompt: string;
   userPrompt: string;
   model?: string; // Optional: use "google/gemini-2.5-pro" for deeper analysis
 }): Promise<{ vote: boolean; reason: string } | null> {
-  const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-  if (!LOVABLE_API_KEY) return null;
+  const AI_GATEWAY_API_KEY = Deno.env.get("AI_GATEWAY_API_KEY");
+  if (!AI_GATEWAY_API_KEY) return null;
 
   try {
     const controller = new AbortController();
     const t = setTimeout(() => controller.abort(), 12000);
 
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       signal: controller.signal,
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${LOVABLE_API_KEY}` },
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${AI_GATEWAY_API_KEY}` },
       body: JSON.stringify({
         model: opts.model || "google/gemini-2.5-flash",
         messages: [
@@ -224,7 +224,7 @@ async function masterStrategistVote(opts: {
     : "unknown";
   const assetLabel = opts.assetType === "stock" ? "Stock" : "Crypto";
 
-  return lovableAiVote({
+  return aiGatewayVote({
     name: "master-strategist",
     model: "google/gemini-2.5-pro", // Use Pro model for complex reasoning
     systemPrompt: "You are an elite trading strategist combining technical, fundamental, and sentiment analysis for both stocks and crypto. Respond with valid JSON only.",
@@ -264,7 +264,7 @@ async function aiRiskAssessorVote(opts: {
     ? ((opts.ohlc.high - opts.ohlc.low) / opts.ohlc.low * 100).toFixed(2) 
     : "unknown";
 
-  return lovableAiVote({
+  return aiGatewayVote({
     name: "ai-risk-assessor",
     model: "google/gemini-2.5-pro",
     systemPrompt: "You are a quantitative risk analyst. Respond with valid JSON only.",
@@ -296,7 +296,7 @@ async function patternRecognitionVote(opts: {
   ordersLeft: boolean;
   ohlc: { high: number; low: number; volume: number };
 }): Promise<{ vote: boolean; reason: string } | null> {
-  return lovableAiVote({
+  return aiGatewayVote({
     name: "pattern-recognition",
     model: "google/gemini-2.5-flash",
     systemPrompt: "You are a chart pattern recognition expert. Respond with valid JSON only.",
@@ -333,7 +333,7 @@ async function stockFundamentalAnalystVote(opts: {
   // Only run for stocks
   if (opts.assetType !== "stock") return null;
   
-  return lovableAiVote({
+  return aiGatewayVote({
     name: "stock-fundamental-analyst",
     model: "google/gemini-2.5-pro",
     systemPrompt: "You are a fundamental stock analyst expert in valuation metrics. Respond with valid JSON only.",
@@ -366,7 +366,7 @@ async function stockEarningsAnalystVote(opts: {
 }): Promise<{ vote: boolean; reason: string } | null> {
   if (opts.assetType !== "stock") return null;
   
-  return lovableAiVote({
+  return aiGatewayVote({
     name: "stock-earnings-analyst",
     model: "google/gemini-2.5-flash",
     systemPrompt: "You are an earnings and growth analyst. Respond with valid JSON only.",
@@ -399,7 +399,7 @@ async function stockSectorRotationVote(opts: {
 }): Promise<{ vote: boolean; reason: string } | null> {
   if (opts.assetType !== "stock") return null;
   
-  return lovableAiVote({
+  return aiGatewayVote({
     name: "stock-sector-rotation",
     model: "google/gemini-2.5-flash",
     systemPrompt: "You are a sector rotation and market cycle expert. Respond with valid JSON only.",
@@ -432,7 +432,7 @@ async function stockInstitutionalFlowVote(opts: {
 }): Promise<{ vote: boolean; reason: string } | null> {
   if (opts.assetType !== "stock") return null;
   
-  return lovableAiVote({
+  return aiGatewayVote({
     name: "stock-institutional-flow",
     model: "google/gemini-2.5-flash",
     systemPrompt: "You are an institutional flow and smart money expert. Respond with valid JSON only.",
@@ -464,7 +464,7 @@ async function optionsFlowAnalystVote(opts: {
   assetType?: string;
 }): Promise<{ vote: boolean; reason: string } | null> {
   // Options flow mainly relevant for stocks, but can inform crypto sentiment
-  return lovableAiVote({
+  return aiGatewayVote({
     name: "options-flow-analyst",
     model: "google/gemini-2.5-pro",
     systemPrompt: "You are an options flow expert specializing in unusual activity detection. Respond with valid JSON only.",
@@ -508,7 +508,7 @@ async function microScalperVote(opts: {
     ? ((opts.ohlc.high - opts.ohlc.low) / opts.ohlc.low * 100).toFixed(3) 
     : "0";
 
-  return lovableAiVote({
+  return aiGatewayVote({
     name: "micro-scalper",
     model: "google/gemini-2.5-flash",
     systemPrompt: "You are a high-frequency micro-scalping expert. Focus on tiny, consistent gains. Respond with valid JSON only.",
@@ -550,7 +550,7 @@ async function pennyStockHunterVote(opts: {
     ? ((opts.ohlc.high - opts.ohlc.low) / opts.ohlc.low * 100).toFixed(2) 
     : "0";
 
-  return lovableAiVote({
+  return aiGatewayVote({
     name: "penny-stock-hunter",
     model: "google/gemini-2.5-flash",
     systemPrompt: "You are a penny stock and micro-cap specialist. Respond with valid JSON only.",
@@ -593,7 +593,7 @@ async function etfMomentumRiderVote(opts: {
   const etfSymbols = ["SPY", "QQQ", "IWM", "VTI", "VOO", "ARKK", "TQQQ", "GLD", "TBLL"];
   const isEtf = etfSymbols.includes(opts.symbol);
   
-  return lovableAiVote({
+  return aiGatewayVote({
     name: "etf-momentum-rider",
     model: "google/gemini-2.5-flash",
     systemPrompt: "You are an ETF momentum trading specialist. Respond with valid JSON only.",
@@ -630,7 +630,7 @@ async function compoundGrowthVote(opts: {
   ordersLeft: boolean;
   assetType?: string;
 }): Promise<{ vote: boolean; reason: string } | null> {
-  return lovableAiVote({
+  return aiGatewayVote({
     name: "compound-growth-calculator",
     model: "google/gemini-2.5-flash",
     systemPrompt: "You are a compound growth optimization expert focused on reaching $10M. Respond with valid JSON only.",
@@ -674,7 +674,7 @@ async function effectAiVote(opts: {
     : "unknown";
   const assetLabel = opts.assetType === "stock" ? "Stock/ETF" : "Crypto";
 
-  return lovableAiVote({
+  return aiGatewayVote({
     name: "effect-ai",
     model: "google/gemini-2.5-pro", // Pro model for deep multi-dimensional analysis
     systemPrompt: "You are Effect AI - a special council member that analyzes the combined EFFECT of multiple market forces. You weight votes carefully and only approve high-conviction trades. Respond with valid JSON only.",
@@ -806,7 +806,7 @@ async function topTraderAnalystVote(opts: {
   symbol: string;
   ordersLeft: boolean;
 }): Promise<{ vote: boolean; reason: string } | null> {
-  return lovableAiVote({
+  return aiGatewayVote({
     name: "top-trader-analyst",
     systemPrompt: "You emulate top trader strategies. Respond with valid JSON only.",
     userPrompt: `You are the "Top Trader Analyst" - an AI that studies strategies of the world's most profitable traders like Warren Buffett, Ray Dalio, Cathie Wood, and top crypto whales.
@@ -828,7 +828,7 @@ async function newsSentimentVote(opts: {
   symbol: string;
   ordersLeft: boolean;
 }): Promise<{ vote: boolean; reason: string } | null> {
-  return lovableAiVote({
+  return aiGatewayVote({
     name: "news-sentiment",
     systemPrompt: "You analyze market sentiment. Respond with valid JSON only.",
     userPrompt: `You are "News Sentiment AI" - an expert at analyzing market news and social sentiment for trading decisions.
@@ -855,7 +855,7 @@ async function whaleTrackerVote(opts: {
   symbol: string;
   ordersLeft: boolean;
 }): Promise<{ vote: boolean; reason: string } | null> {
-  return lovableAiVote({
+  return aiGatewayVote({
     name: "whale-tracker",
     systemPrompt: "You predict whale trader behavior. Respond with valid JSON only.",
     userPrompt: `You are "Whale Tracker AI" - an expert at predicting large institutional and whale trader behavior in crypto and stocks.
@@ -883,7 +883,7 @@ async function defiProtocolVote(opts: {
   symbol: string;
   ordersLeft: boolean;
 }): Promise<{ vote: boolean; reason: string } | null> {
-  return lovableAiVote({
+  return aiGatewayVote({
     name: "defi-protocol",
     systemPrompt: "You analyze DeFi protocols and on-chain metrics. Respond with valid JSON only.",
     userPrompt: `You are "DeFi Protocol AI" - an expert at analyzing on-chain metrics, Total Value Locked (TVL), protocol activity, and DeFi ecosystem health.
@@ -911,7 +911,7 @@ async function contrarianAnalystVote(opts: {
   symbol: string;
   ordersLeft: boolean;
 }): Promise<{ vote: boolean; reason: string } | null> {
-  return lovableAiVote({
+  return aiGatewayVote({
     name: "contrarian-analyst",
     systemPrompt: "You are a contrarian trader who profits by going against the crowd. Respond with valid JSON only.",
     userPrompt: `You are "Contrarian Analyst" - an expert at finding profitable opportunities when the crowd is wrong.
@@ -945,7 +945,7 @@ async function gridTradingBotVote(opts: {
     ? ((opts.ohlc.high - opts.ohlc.low) / opts.ohlc.low * 100).toFixed(2) 
     : "unknown";
   
-  return lovableAiVote({
+  return aiGatewayVote({
     name: "grid-trading-bot",
     systemPrompt: "You are a grid trading expert. Respond with valid JSON only.",
     userPrompt: `You are "Grid Trading Bot" - an expert at automated grid trading strategies that profit from market volatility.
@@ -978,7 +978,7 @@ async function scalpingBotVote(opts: {
   ordersLeft: boolean;
   ohlc: { high: number; low: number; volume: number };
 }): Promise<{ vote: boolean; reason: string } | null> {
-  return lovableAiVote({
+  return aiGatewayVote({
     name: "scalping-bot",
     systemPrompt: "You are a scalping expert focused on quick small profits. Respond with valid JSON only.",
     userPrompt: `You are "Scalping Bot" - an expert at making quick small profits from tiny price movements.
@@ -1014,7 +1014,7 @@ async function meanReversionBotVote(opts: {
     ? ((opts.ohlc.high + opts.ohlc.low) / 2).toFixed(2) 
     : "unknown";
   
-  return lovableAiVote({
+  return aiGatewayVote({
     name: "mean-reversion-bot",
     systemPrompt: "You are a mean reversion trading expert. Respond with valid JSON only.",
     userPrompt: `You are "Mean Reversion Bot" - an expert at trading based on price returning to its average.
@@ -1046,7 +1046,7 @@ async function fearGreedIndexVote(opts: {
   symbol: string;
   ordersLeft: boolean;
 }): Promise<{ vote: boolean; reason: string } | null> {
-  return lovableAiVote({
+  return aiGatewayVote({
     name: "fear-greed-index",
     systemPrompt: "You analyze market fear and greed sentiment. Respond with valid JSON only.",
     userPrompt: `You are "Fear & Greed Index AI" - an expert at measuring market emotion extremes.
@@ -1077,7 +1077,7 @@ async function macroEconomistVote(opts: {
   symbol: string;
   ordersLeft: boolean;
 }): Promise<{ vote: boolean; reason: string } | null> {
-  return lovableAiVote({
+  return aiGatewayVote({
     name: "macro-economist",
     systemPrompt: "You are a macro economist analyzing global economic conditions. Respond with valid JSON only.",
     userPrompt: `You are "Macro Economist AI" - an expert at analyzing macro economic conditions affecting crypto and stocks.
@@ -1106,7 +1106,7 @@ async function dcaBotVote(opts: {
   symbol: string;
   ordersLeft: boolean;
 }): Promise<{ vote: boolean; reason: string } | null> {
-  return lovableAiVote({
+  return aiGatewayVote({
     name: "dca-bot",
     systemPrompt: "You are a DCA (dollar cost averaging) expert. Respond with valid JSON only.",
     userPrompt: `You are "DCA Bot" - an expert at systematic dollar cost averaging strategies.
@@ -1136,7 +1136,7 @@ async function momentumBreakoutVote(opts: {
   ordersLeft: boolean;
   ohlc: { high: number; low: number; volume: number };
 }): Promise<{ vote: boolean; reason: string } | null> {
-  return lovableAiVote({
+  return aiGatewayVote({
     name: "momentum-breakout",
     systemPrompt: "You are a momentum breakout trading expert. Respond with valid JSON only.",
     userPrompt: `You are "Momentum Breakout Bot" - an expert at catching strong momentum moves and breakouts.
@@ -1161,13 +1161,13 @@ Respond with ONLY JSON: {"vote":"YES" or "NO","reason":"Brief breakout analysis 
   });
 }
 
-async function lovableAiStrategistVote(opts: {
+async function aiStrategistVote(opts: {
   context: { pct: number; krakenPair: string; symbol: string; ordersLeft: boolean };
 }): Promise<{ vote: boolean; reason: string } | null> {
   try {
-    const lovableApiKey = Deno.env.get("LOVABLE_API_KEY");
-    if (!lovableApiKey) {
-      console.log("[lovable-strategist] No LOVABLE_API_KEY configured");
+    const aiGatewayApiKey = Deno.env.get("AI_GATEWAY_API_KEY");
+    if (!aiGatewayApiKey) {
+      console.log("[ai-strategist] No AI_GATEWAY_API_KEY configured");
       return null;
     }
 
@@ -1188,12 +1188,12 @@ Rules:
 - Vote YES only on mild dips (-1% to -3%) with stable conditions
 - Be conservative - when in doubt, vote NO`;
 
-    const r = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    const r = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       signal: controller.signal,
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${lovableApiKey}`,
+        Authorization: `Bearer ${aiGatewayApiKey}`,
       },
       body: JSON.stringify({
         model: "google/gemini-2.5-flash",
@@ -1206,7 +1206,7 @@ Rules:
     clearTimeout(t);
     
     if (!r.ok) {
-      console.log(`[lovable-strategist] API error: ${r.status}`);
+      console.log(`[ai-strategist] API error: ${r.status}`);
       return null;
     }
 
@@ -1224,11 +1224,11 @@ Rules:
     if (!parsed?.vote) return null;
     
     const vote = String(parsed.vote).toUpperCase() === "YES";
-    const reason = typeof parsed.reason === "string" ? parsed.reason.slice(0, 50) : "Lovable AI vote";
-    console.log(`[lovable-strategist] Vote: ${vote ? "YES" : "NO"}, Reason: ${reason}`);
+    const reason = typeof parsed.reason === "string" ? parsed.reason.slice(0, 50) : "AI vote";
+    console.log(`[ai-strategist] Vote: ${vote ? "YES" : "NO"}, Reason: ${reason}`);
     return { vote, reason };
   } catch (e) {
-    console.log(`[lovable-strategist] Error: ${e instanceof Error ? e.message : "unknown"}`);
+    console.log(`[ai-strategist] Error: ${e instanceof Error ? e.message : "unknown"}`);
     return null;
   }
 }
@@ -2426,7 +2426,7 @@ serve(async (req) => {
       let totalMembers = 5;
       let yesVotes = Number(String(c.votes).split("/")[0] || "0");
 
-      // Run ALL AI analysts in parallel for maximum speed (uses Lovable AI + Perplexity - no user config needed)
+      // Run ALL AI analysts in parallel for maximum speed (uses AI Gateway + Perplexity - no user config needed)
       const aiContext = { pct, krakenPair, symbol: bestPair.symbol, ordersLeft, assetType };
       const ohlcContext = { ...aiContext, ohlc };
       
@@ -2547,16 +2547,16 @@ serve(async (req) => {
         }
       }
 
-      // Lovable AI Strategist vote - uses pre-configured LOVABLE_API_KEY (no user key needed)
-      const lovableVote = await lovableAiStrategistVote({ context: aiContext });
-      if (lovableVote) {
+      // AI Strategist vote - uses pre-configured AI_GATEWAY_API_KEY (no user key needed)
+      const aiStrategistResult = await aiStrategistVote({ context: aiContext });
+      if (aiStrategistResult) {
         totalMembers++;
         aiVotesReceived++;
-        if (lovableVote.vote) {
+        if (aiStrategistResult.vote) {
           yesVotes++;
           aiYesVotes++;
         }
-        c.reasons.push(`${lovableVote.vote ? "YES" : "NO"}: AI Strategist • ${lovableVote.reason}`);
+        c.reasons.push(`${aiStrategistResult.vote ? "YES" : "NO"}: AI Strategist • ${aiStrategistResult.reason}`);
       }
 
       // AGGRESSIVE MICRO-PROFIT THRESHOLD SYSTEM:

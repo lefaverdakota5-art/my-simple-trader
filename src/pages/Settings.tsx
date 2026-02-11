@@ -171,10 +171,10 @@ export default function Settings() {
         border: "1px solid hsl(var(--primary) / 0.2)"
       }}>
         <h3 style={{ fontWeight: 600, marginBottom: "8px", color: "hsl(var(--primary))" }}>
-          ✨ AI Council Powered by Lovable
+          ✨ AI Council Powered by Supabase
         </h3>
         <p style={{ color: "hsl(var(--muted-foreground))", fontSize: "0.9rem", margin: 0 }}>
-          Your trading decisions are analyzed by 21 AI council members using Lovable AI and Perplexity for real-time news. No API keys required!
+          Your trading decisions are analyzed by 21 AI council members using AI and Perplexity for real-time news. No API keys required!
         </p>
       </div>
 
