@@ -585,7 +585,7 @@ export default function Settings() {
       {/* App Version */}
       <div style={{ marginTop: "32px", paddingTop: "16px", borderTop: "1px solid hsl(var(--border))" }}>
         <p style={{ color: "hsl(var(--muted-foreground))", fontSize: "0.75rem", textAlign: "center" }}>
-          AI Trader v1.5 • Build {import.meta.env.MODE === 'production' ? 'Release' : 'Dev'}
+          AI Trader v1.4.0 • Build {import.meta.env.MODE === 'production' ? 'Release' : 'Dev'}
         </p>
       </div>
     </div>

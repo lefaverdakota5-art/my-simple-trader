@@ -242,18 +242,16 @@ export default function CashOut() {
         </CardHeader>
         <CardContent>
           <p className="text-sm text-muted-foreground mb-4">
-            Once your funds are in USD, use Kraken to withdraw to your bank.
+            Once your funds are in USD, withdraw to your bank account.
           </p>
           <div className="grid grid-cols-2 gap-3">
-            <a
-              href="https://pro.kraken.com/app/trade"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center justify-center gap-2 p-3 rounded-lg border border-border hover:bg-muted transition-colors"
+            <button
+              onClick={() => navigate('/withdraw')}
+              className="flex items-center justify-center gap-2 p-3 rounded-lg border-2 border-blue-500 bg-blue-50 dark:bg-blue-950 text-blue-600 font-semibold hover:bg-blue-100 transition-colors"
             >
-              <ExternalLink className="h-4 w-4" />
-              Convert to USD
-            </a>
+              <DollarSign className="h-4 w-4" />
+              Withdraw to Bank
+            </button>
             <a
               href="https://www.kraken.com/u/funding"
               target="_blank"
@@ -261,7 +259,7 @@ export default function CashOut() {
               className="flex items-center justify-center gap-2 p-3 rounded-lg border border-border hover:bg-muted transition-colors"
             >
               <ExternalLink className="h-4 w-4" />
-              Withdraw
+              Open Kraken
             </a>
           </div>
         </CardContent>
@@ -270,10 +268,10 @@ export default function CashOut() {
       {/* Important Note */}
       <Card className="bg-muted/50">
         <CardContent className="pt-6">
-          <Badge variant="outline" className="mb-2">Important</Badge>
+          <Badge variant="outline" className="mb-2">How it works</Badge>
           <p className="text-sm text-muted-foreground">
-            Automated withdrawals are NOT supported. After selling your positions, 
-            use the Kraken app to manually withdraw USD to your bank account.
+            After selling your positions, use the Banking page to withdraw USD directly to your bank account 
+            via the Kraken API. Make sure your withdrawal key is configured in Settings.
           </p>
         </CardContent>
       </Card>
