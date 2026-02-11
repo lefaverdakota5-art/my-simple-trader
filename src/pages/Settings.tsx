@@ -26,6 +26,7 @@ export default function Settings() {
 
   const [krakenKey, setKrakenKey] = useState("");
   const [krakenSecret, setKrakenSecret] = useState("");
+  const [krakenWithdrawKey, setKrakenWithdrawKey] = useState("");
   const [alpacaApiKey, setAlpacaApiKey] = useState("");
   const [alpacaSecret, setAlpacaSecret] = useState("");
   const [alpacaPaper, setAlpacaPaper] = useState(true);
@@ -484,6 +485,22 @@ export default function Settings() {
               placeholder="Paste your Kraken secret"
             />
           </div>
+          <div style={{ marginBottom: "12px" }}>
+            <label style={{ display: "block", marginBottom: "4px", fontWeight: 500 }}>Kraken Withdrawal Key</label>
+            <input
+              className="plain-input"
+              type="text"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              value={krakenWithdrawKey}
+              onChange={(e) => setKrakenWithdrawKey(e.target.value)}
+              placeholder="Name of your bank withdrawal address in Kraken"
+            />
+            <p style={{ color: "hsl(var(--muted-foreground))", fontSize: "0.8rem", marginTop: "4px" }}>
+              The name of the withdrawal address you configured in Kraken (e.g., 'My Bank'). Required for withdrawals.
+            </p>
+          </div>
         </div>
 
         {validationError && (
@@ -531,6 +548,7 @@ export default function Settings() {
                   action: "set_keys",
                   kraken_key: krakenKey.trim() || null,
                   kraken_secret: krakenSecret.trim() || null,
+                  kraken_withdraw_key: krakenWithdrawKey.trim() || null,
                   alpaca_api_key: alpacaApiKey.trim() || null,
                   alpaca_secret: alpacaSecret.trim() || null,
                   alpaca_paper: alpacaPaper,
@@ -544,6 +562,7 @@ export default function Settings() {
                 toast({ title: "Saved", description: "Exchange keys stored securely." });
                 setKrakenKey("");
                 setKrakenSecret("");
+                setKrakenWithdrawKey("");
                 setAlpacaApiKey("");
                 setAlpacaSecret("");
                 // Refresh status
