@@ -67,7 +67,7 @@ check_supabase_consistency() {
     print_check "Checking Supabase project ID across configuration files"
     
     # Expected project ID
-    EXPECTED_PROJECT_ID="whdljtbtqisoszbrzdwq"
+    EXPECTED_PROJECT_ID="pchaijknfmrddivqjesm"
     
     # Check supabase/config.toml
     if [ -f "supabase/config.toml" ]; then
