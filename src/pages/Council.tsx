@@ -33,7 +33,7 @@ const AI_COUNCIL_CONFIG = [
   { name: 'Technical Analyst', icon: BarChart3, category: 'Core', color: 'text-purple-500' },
   { name: 'Volatility Guard', icon: Activity, category: 'Core', color: 'text-orange-500' },
   { name: 'Portfolio Guardian', icon: Target, category: 'Core', color: 'text-green-500' },
-  // AI Analysts (Lovable AI powered)
+  // AI Analysts (AI powered)
   { name: 'Top Trader Analyst', icon: Brain, category: 'AI', color: 'text-yellow-500' },
   { name: 'News Sentiment AI', icon: Newspaper, category: 'AI', color: 'text-cyan-500' },
   { name: 'Whale Tracker AI', icon: Anchor, category: 'AI', color: 'text-indigo-500' },
