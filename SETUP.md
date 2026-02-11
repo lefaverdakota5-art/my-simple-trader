@@ -267,7 +267,69 @@ Expected response:
 - ✅ Monitor usage regularly
 - ❌ Don't expose key on frontend
 
-### 3.5 Where to Set Keys: Railway vs Settings UI
+### 3.5 OpenAI API Key: GitHub Secrets, Vercel & Supabase
+
+If you are deploying the **frontend to Vercel**, you need to configure the OpenAI API key in the right places. Here's where and how:
+
+#### GitHub Repository Secrets (for CI/CD & Vercel)
+
+If you connect your GitHub repo to Vercel for automatic deployments, Vercel can read environment variables you set directly in the **Vercel dashboard** (recommended). You do **not** need to add `OPENAI_API_KEY` as a GitHub repository secret unless a GitHub Actions workflow needs it.
+
+However, if you want to pass environment variables from GitHub to Vercel via a GitHub Actions deployment workflow, add them as **GitHub repository secrets**:
+
+1. Go to your GitHub repo → **Settings** → **Secrets and variables** → **Actions**
+2. Click **New repository secret**
+3. Add the following secrets:
+
+| Secret Name         | Value                        | Description                   |
+|---------------------|------------------------------|-------------------------------|
+| `OPENAI_API_KEY`    | `sk-...your key...`         | Your OpenAI API key           |
+| `OPENAI_MODEL`      | `gpt-4o-mini`               | (Optional) OpenAI model name  |
+
+> **Note:** The secret **must** be named exactly `OPENAI_API_KEY` — this matches the environment variable name used by the backend (`main.py`) and Supabase Edge Functions.
+
+#### Vercel Environment Variables
+
+When deploying the frontend to Vercel, add environment variables in the **Vercel dashboard**:
+
+1. Go to: https://vercel.com → Your Project → **Settings** → **Environment Variables**
+2. Add the following:
+
+| Name                               | Value                              | Environment     |
+|------------------------------------|------------------------------------|-----------------|
+| `VITE_SUPABASE_URL`               | `https://whdljtbtqisoszbrzdwq.supabase.co` | All |
+| `VITE_SUPABASE_PUBLISHABLE_KEY`   | Your Supabase anon/public key      | All             |
+
+> **Important:** The OpenAI API key is a **backend secret** — it should **not** be added to Vercel as a `VITE_` prefixed variable because that would expose it in the browser. The frontend never calls OpenAI directly; it goes through the backend (Railway) or Supabase Edge Functions.
+
+#### Do You Need to Add It to Supabase?
+
+**Yes** — if you use Supabase Edge Functions for trading (the `bot-tick` function calls OpenAI for AI council voting). Add it as a Supabase Edge Function secret:
+
+```bash
+npx supabase secrets set OPENAI_API_KEY=sk-...your_key_here
+```
+
+Or via the Supabase Dashboard:
+1. Go to: https://supabase.com/dashboard/project/whdljtbtqisoszbrzdwq
+2. Navigate to: **Edge Functions** → **Settings** → **Secrets**
+3. Add: `OPENAI_API_KEY` = your key
+
+Additionally, per-user OpenAI keys can be stored in the `user_exchange_keys` table via the **Settings UI** in the app. This allows each user to bring their own OpenAI key.
+
+#### Summary: Where to Put the OpenAI API Key
+
+| Platform          | Variable Name     | Required? | Purpose                                    |
+|-------------------|-------------------|-----------|--------------------------------------------|
+| **Railway**       | `OPENAI_API_KEY`  | Yes*      | Backend bot uses it for AI council voting   |
+| **Supabase**      | `OPENAI_API_KEY`  | Yes*      | Edge Functions (`bot-tick`) call OpenAI     |
+| **GitHub Secrets**| `OPENAI_API_KEY`  | Optional  | Only if a GitHub Actions workflow deploys to a service that needs it |
+| **Vercel**        | Do **not** add    | No        | Frontend never calls OpenAI directly        |
+| **Settings UI**   | (per-user)        | Optional  | Users can add their own key in the app      |
+
+\* At least one of Railway or Supabase is required if you want AI council voting to work.
+
+### 3.6 Where to Set Keys: Railway vs Settings UI
 
 **Use Railway Environment Variables when**:
 - ✅ Keys are shared across all users (single-tenant deployment)
