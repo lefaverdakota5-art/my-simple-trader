@@ -137,6 +137,12 @@ All API keys can be configured dynamically through the app's Settings page:
    - Get key from https://platform.openai.com
    - Optional but recommended for intelligent trading
    - Supports GPT-4o-mini (default) and other models
+   - **Where to add the key:**
+     - **Railway**: Set `OPENAI_API_KEY` in Railway environment variables (for the backend)
+     - **Supabase**: Set `OPENAI_API_KEY` as an Edge Function secret (for `bot-tick`)
+     - **GitHub Secrets**: Name it `OPENAI_API_KEY` (only needed if a GitHub Actions workflow requires it)
+     - **Vercel**: Do **not** add it — the frontend never calls OpenAI directly
+   - See [SETUP.md](SETUP.md#35-openai-api-key-github-secrets-vercel--supabase) for full details
 
 5. **Supabase** (Database)
    - Already configured in `.env`
