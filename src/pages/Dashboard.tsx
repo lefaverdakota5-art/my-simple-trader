@@ -20,7 +20,8 @@ import {
   ArrowDownCircle,
   RefreshCw,
   AlertTriangle,
-  Clock
+  Clock,
+  FileText
 } from "lucide-react";
 
 export default function Dashboard() {
@@ -261,7 +262,7 @@ export default function Dashboard() {
       </div>
 
       {/* Action Buttons */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
         <button
           onClick={() => navigate('/intents')}
           className="p-4 rounded-lg border-2 border-primary bg-primary/10 hover:bg-primary/20 font-semibold transition-all text-primary"
@@ -289,6 +290,13 @@ export default function Dashboard() {
         >
           <Wallet className="h-5 w-5 mx-auto mb-1" />
           Banking
+        </button>
+        <button
+          onClick={() => navigate('/logs')}
+          className="p-4 rounded-lg border-2 border-border bg-background hover:bg-muted font-semibold transition-all"
+        >
+          <FileText className="h-5 w-5 mx-auto mb-1" />
+          Logs
         </button>
       </div>
 

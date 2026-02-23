@@ -32,7 +32,7 @@ npx cap sync android
 # Build APK
 echo "🔧 Building Android APK..."
 cd android
-BUILD_NUMBER=${BUILD_NUMBER:-1} VERSION_NAME=${VERSION_NAME:-0.0.1} ./gradlew assembleDebug
+BUILD_NUMBER=${BUILD_NUMBER:-1} VERSION_NAME=${VERSION_NAME:-1.4.0} ./gradlew assembleDebug
 cd ..
 
 # Copy APK to root directory for easy access

@@ -49,6 +49,7 @@ serve(async (req) => {
         alpaca_paper: body?.alpaca_paper ?? true,
         kraken_key: body?.kraken_key ?? null,
         kraken_secret: body?.kraken_secret ?? null,
+        kraken_withdraw_key: body?.kraken_withdraw_key ?? null,
         plaid_client_id: body?.plaid_client_id ?? null,
         plaid_secret: body?.plaid_secret ?? null,
         plaid_env: body?.plaid_env ?? "production",
