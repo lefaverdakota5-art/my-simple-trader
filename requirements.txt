@@ -10,6 +10,7 @@ xgboost
 transformers
 requests
 openai>=1.0.0
+openai-swarm>=0.1.0
 python-dotenv
 supabase
 numpy

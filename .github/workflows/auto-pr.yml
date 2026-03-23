@@ -1,0 +1,64 @@
+name: Auto Create Pull Request
+
+on:
+  push:
+    branches-ignore:
+      - main
+      - master
+
+jobs:
+  auto-pr:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Create Pull Request via GitHub API
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const branch = context.ref.replace('refs/heads/', '');
+            const base = 'main';
+
+            // Check if a PR already exists for this branch
+            const { data: existing } = await github.rest.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              head: `${context.repo.owner}:${branch}`,
+              base,
+            });
+
+            if (existing.length > 0) {
+              core.info(`PR already exists: ${existing[0].html_url}`);
+              return;
+            }
+
+            const title = `feat: ${branch}`;
+            const body = [
+              '## Automated Pull Request',
+              '',
+              `**Branch:** \`${branch}\``,
+              `**Triggered by:** ${context.actor}`,
+              `**Commit:** ${context.sha}`,
+              '',
+              'This PR was automatically created when changes were pushed to `' + branch + '`.',
+              '',
+              '### Changes',
+              '<!-- Describe your changes here -->',
+            ].join('\n');
+
+            const { data: pr } = await github.rest.pulls.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              body,
+              head: branch,
+              base,
+              draft: false,
+            });
+
+            core.info(`PR created: ${pr.html_url}`);
+

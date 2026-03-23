@@ -48,12 +48,17 @@ from src.ai_modules.hft import HighFrequencyTrader
 from src.ai_modules.arbitrage import ArbitrageEngine
 from src.ai_modules.profit_maximizer import ProfitMaximizer
 
-# OpenAI is optional; if not installed, the council falls back to deterministic voting
+# OpenAI Swarm is optional; if not installed, the council falls back to deterministic voting
 try:
     from openai import OpenAI as OpenAIClient
+    from swarm import Swarm, Agent as SwarmAgent  # type: ignore
+    _SWARM_AVAILABLE = True
 except ImportError:
     OpenAIClient = None  # type: ignore
-    logger.warning("OpenAI package not installed, AI council will use deterministic voting")
+    Swarm = None  # type: ignore
+    SwarmAgent = None  # type: ignore
+    _SWARM_AVAILABLE = False
+    logger.warning("OpenAI/openai-swarm package not installed, AI council will use deterministic voting")
 
 
 
@@ -569,89 +574,98 @@ def _openai_council_vote(
     openai_model: str = "gpt-4o-mini",
 ) -> tuple[str, list[str], bool]:
     """
-    Enhanced council voting using OpenAI for intelligent decision-making.
-    Each of 5 AI agents analyzes the market data and votes YES/NO.
+    Enhanced council voting using the OpenAI Swarm multi-agent framework.
+    Each of 5 SwarmAgent instances analyzes market data and votes YES/NO.
     4/5 YES votes are required to approve trading.
+    See: https://github.com/openai/swarm
     """
-    if not OpenAIClient:
-        # Fallback to deterministic voting if OpenAI is not installed
+    if not _SWARM_AVAILABLE or not OpenAIClient:
+        # Fallback to deterministic voting if openai-swarm is not installed
         return _council_vote_from_price_change(pct_change, orders_left)
-    
-    try:
-        client = OpenAIClient(api_key=openai_api_key)
-        
-        # Define 5 AI agents with different perspectives
-        agents = [
-            {
-                "name": "Momentum Analyst",
-                "role": "You are a momentum trading expert. Analyze if the price change indicates strong momentum worth trading.",
-            },
-            {
-                "name": "Risk Manager",
-                "role": "You are a conservative risk manager. Assess if the trade risk is acceptable given the volatility.",
-            },
-            {
-                "name": "Technical Analyst",
-                "role": "You are a technical analysis expert. Determine if technical indicators support this trade.",
-            },
-            {
-                "name": "Market Sentiment Analyst",
-                "role": "You are a market sentiment expert. Evaluate if the price change reflects positive market sentiment.",
-            },
-            {
-                "name": "Portfolio Guardian",
-                "role": "You are a portfolio protection specialist. Assess if trading now aligns with daily risk limits.",
-            },
-        ]
-        
-        market_data = f"""
-Market Analysis Request:
-- Price change: {pct_change:.2f}%
-- Orders remaining today: {'Yes' if orders_left else 'No'}
-- Risk limits: Orders left = {orders_left}
 
-Respond with ONLY 'YES' or 'NO' followed by a brief one-sentence reason (max 80 chars).
-Format: YES: [reason] or NO: [reason]
-"""
-        
-        votes = []
-        reasons = []
+    try:
+        swarm_client = Swarm(client=OpenAIClient(api_key=openai_api_key))
+
+        market_prompt = (
+            f"Price change: {pct_change:.2f}%. "
+            f"Orders remaining today: {'Yes' if orders_left else 'No'}. "
+            "Reply with ONLY 'YES: <one short reason>' or 'NO: <one short reason>' (max 80 chars total)."
+        )
+
+        # Define 5 Swarm agents with distinct trading perspectives
+        council_agents = [
+            SwarmAgent(
+                name="Momentum Analyst",
+                model=openai_model,
+                instructions=(
+                    "You are a momentum trading expert. "
+                    "Analyze whether the price change indicates strong momentum worth trading."
+                ),
+            ),
+            SwarmAgent(
+                name="Risk Manager",
+                model=openai_model,
+                instructions=(
+                    "You are a conservative risk manager. "
+                    "Assess whether the trade risk is acceptable given the current conditions."
+                ),
+            ),
+            SwarmAgent(
+                name="Technical Analyst",
+                model=openai_model,
+                instructions=(
+                    "You are a technical analysis expert. "
+                    "Determine whether technical indicators support this trade."
+                ),
+            ),
+            SwarmAgent(
+                name="Market Sentiment Analyst",
+                model=openai_model,
+                instructions=(
+                    "You are a market sentiment expert. "
+                    "Evaluate whether the price change reflects positive market sentiment."
+                ),
+            ),
+            SwarmAgent(
+                name="Portfolio Guardian",
+                model=openai_model,
+                instructions=(
+                    "You are a portfolio protection specialist. "
+                    "Assess whether trading now aligns with daily risk limits."
+                ),
+            ),
+        ]
+
+        votes: list[bool] = []
+        reasons: list[str] = []
         max_reason_length = 80
-        
-        for agent in agents:
+
+        for agent in council_agents:
             try:
-                response = client.chat.completions.create(
-                    model=openai_model,
-                    messages=[
-                        {"role": "system", "content": agent["role"]},
-                        {"role": "user", "content": market_data},
-                    ],
-                    max_tokens=50,
-                    temperature=0.7,
+                response = swarm_client.run(
+                    agent=agent,
+                    messages=[{"role": "user", "content": market_prompt}],
+                    max_turns=1,
                 )
-                
-                result = response.choices[0].message.content.strip()
+                result = response.messages[-1]["content"].strip() if response.messages else "NO: no response"
                 vote = result.upper().startswith("YES")
                 votes.append(vote)
-                
-                # Format the reason nicely with consistent truncation
-                reason_text = result if len(result) < max_reason_length else result[:max_reason_length - 3] + "..."
-                reasons.append(f"{agent['name']}: {reason_text}")
-                
-            except Exception as e:
-                # If an agent fails, it votes NO by default
-                error_msg = str(e)
-                error_text = error_msg if len(error_msg) < 40 else error_msg[:37] + "..."
+                reason_text = result if len(result) <= max_reason_length else result[:max_reason_length - 3] + "..."
+                reasons.append(f"{agent.name}: {reason_text}")
+                logger.debug("[swarm-council] %s -> %s", agent.name, reason_text)
+            except Exception as agent_err:
+                err_text = str(agent_err)[:37] + "..." if len(str(agent_err)) > 40 else str(agent_err)
                 votes.append(False)
-                reasons.append(f"{agent['name']}: NO (error: {error_text})")
-        
+                reasons.append(f"{agent.name}: NO (error: {err_text})")
+                logger.warning("[swarm-council] Agent %s failed: %s", agent.name, agent_err)
+
         yes_count = sum(votes)
         approved = yes_count >= 4
-        
+        logger.info("[swarm-council] Result: %d/5 YES, approved=%s", yes_count, approved)
         return f"{yes_count}/5", reasons, approved
-        
+
     except Exception as e:
-        logger.warning(f"[openai-council] Error: {e}. Falling back to deterministic voting.")
+        logger.warning("[swarm-council] Error: %s. Falling back to deterministic voting.", e)
         return _council_vote_from_price_change(pct_change, orders_left)
 
 
