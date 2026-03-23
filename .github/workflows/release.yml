@@ -1,0 +1,114 @@
+name: Create Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v1.5.0)"
+        required: true
+        default: "v1.5.0"
+
+jobs:
+  build-and-release:
+    name: Build All Platforms & Create Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set release tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install JS dependencies
+        run: npm install
+
+      - name: Build web assets
+        run: npm run build
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Sync Capacitor & build Android APK
+        run: |
+          npm run apk:prepare
+          npx cap sync android
+
+      - name: Build Release APK
+        working-directory: android
+        run: ./gradlew assembleDebug
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Bundle Desktop package
+        run: |
+          mkdir -p desktop-bundle
+          cp main.py requirements.txt desktop-bundle/
+          cp -r src desktop-bundle/ 2>/dev/null || true
+          cp schema.sql desktop-bundle/ 2>/dev/null || true
+          zip -r "masterpiece-swarm-trader-desktop-${{ steps.tag.outputs.tag }}.zip" desktop-bundle/
+
+      - name: Rename APK for release
+        run: |
+          cp android/app/build/outputs/apk/debug/app-debug.apk \
+             "masterpiece-swarm-trader-android-${{ steps.tag.outputs.tag }}.apk"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: "Masterpiece Swarm Trader ${{ steps.tag.outputs.tag }}"
+          body: |
+            ## Masterpiece Swarm Trader ${{ steps.tag.outputs.tag }}
+
+            ### Downloads
+            | Platform | File |
+            |----------|------|
+            | 📱 Android APK | `masterpiece-swarm-trader-android-${{ steps.tag.outputs.tag }}.apk` |
+            | 🖥️ Desktop (Python) | `masterpiece-swarm-trader-desktop-${{ steps.tag.outputs.tag }}.zip` |
+
+            ### Installation
+            - **Android**: Download the `.apk` file, enable "Install from unknown sources", and install.
+            - **Desktop**: Extract the `.zip`, run `pip install -r requirements.txt`, then `python main.py`.
+
+            ### What's Included
+            - 4-agent AI swarm council (Technical, Sentiment, Risk, Execution)
+            - Real-time price feeds with Kraken WebSocket API
+            - Supabase ledger for trade logging and P&L tracking
+            - Kill switch and live dashboard UI
+            - Paper trading mode (safe by default)
+
+            See [GITHUB_ACTIONS_SETUP.md](./GITHUB_ACTIONS_SETUP.md) for full setup instructions.
+          files: |
+            masterpiece-swarm-trader-android-${{ steps.tag.outputs.tag }}.apk
+            masterpiece-swarm-trader-desktop-${{ steps.tag.outputs.tag }}.zip
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

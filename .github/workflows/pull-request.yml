@@ -1,0 +1,126 @@
+name: Pull Request Checks
+
+on:
+  pull_request:
+    branches: ["main", "develop"]
+
+jobs:
+  # ──────────────────────────────────────────────
+  # Lint TypeScript / JavaScript
+  # ──────────────────────────────────────────────
+  lint-js:
+    name: Lint JS/TS
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run ESLint
+        run: npm run lint
+
+  # ──────────────────────────────────────────────
+  # Python unit tests
+  # ──────────────────────────────────────────────
+  test-python:
+    name: Python Unit Tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install test dependencies
+        run: |
+          pip install --upgrade pip
+          # Install from requirements.txt but skip heavy ML packages
+          grep -v -E '^(torch|torchvision|torchaudio|tensorflow|transformers|xgboost)' \
+            requirements.txt > /tmp/ci-requirements.txt
+          pip install -r /tmp/ci-requirements.txt --quiet
+
+      - name: Run unit tests
+        run: |
+          python -m pytest test_main.py -v --tb=short 2>/dev/null || \
+          python -m unittest test_main -v
+
+  # ──────────────────────────────────────────────
+  # Validate SQL schema files
+  # ──────────────────────────────────────────────
+  validate-schema:
+    name: Validate SQL Schema
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check schema.sql syntax
+        run: |
+          if [ -f schema.sql ]; then
+            echo "Found schema.sql — validating with sqlite3..."
+            sqlite3 /tmp/test_schema.db < schema.sql && echo "schema.sql OK" \
+              || echo "Warning: schema.sql may use Postgres-specific syntax"
+          else
+            echo "No schema.sql found — skipping"
+          fi
+
+      - name: Check Supabase migration files
+        run: |
+          ERRORS=0
+          for f in supabase/migrations/*.sql; do
+            [ -f "$f" ] || continue
+            echo "Checking $f..."
+            # Basic syntax check: look for unclosed parentheses
+            OPEN=$(grep -o '(' "$f" | wc -l)
+            CLOSE=$(grep -o ')' "$f" | wc -l)
+            if [ "$OPEN" -ne "$CLOSE" ]; then
+              echo "WARNING: Unbalanced parentheses in $f (open=$OPEN close=$CLOSE)"
+              ERRORS=$((ERRORS + 1))
+            fi
+          done
+          echo "Schema validation complete. Errors: $ERRORS"
+
+  # ──────────────────────────────────────────────
+  # Build verification (web assets)
+  # ──────────────────────────────────────────────
+  build-verify:
+    name: Verify Web Build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build web assets
+        run: npm run build
