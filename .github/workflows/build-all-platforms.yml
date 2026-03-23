@@ -1,0 +1,170 @@
+name: Build All Platforms
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+    name: Build Android APK
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install buildozer cython
+      
+      - name: Build Android APK
+        run: |
+          buildozer -v android debug
+      
+      - name: Upload Android APK
+        uses: actions/upload-artifact@v3
+        with:
+          name: android-apk
+          path: bin/*.apk
+          retention-days: 30
+
+  build-desktop:
+    runs-on: ubuntu-latest
+    name: Build Desktop Package
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      - name: Create Desktop Bundle
+        run: |
+          mkdir -p dist
+          cp main.py dist/MasterpieceSwarm-Desktop.py
+          cp requirements.txt dist/requirements.txt
+          cp schema.sql dist/schema.sql
+          cp README.md dist/README.md
+      
+      - name: Upload Desktop Package
+        uses: actions/upload-artifact@v3
+        with:
+          name: desktop-package
+          path: dist/
+          retention-days: 30
+
+  build-ios:
+    runs-on: macos-latest
+    name: Build iOS IPA
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install kivy-ios
+      
+      - name: Create iOS project
+        run: |
+          toolchain create Masterpiece ./
+      
+      - name: Build iOS app
+        run: |
+          cd Masterpiece-ios
+          xcodebuild -scheme Masterpiece -configuration Release -sdk iphoneos build
+          cd ..
+      
+      - name: Upload iOS Build
+        uses: actions/upload-artifact@v3
+        with:
+          name: ios-build
+          path: Masterpiece-ios/build/Release-iphoneos/
+          retention-days: 30
+
+  test-python:
+    runs-on: ubuntu-latest
+    name: Test Python Code
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+  create-release:
+    needs: [build-android, build-desktop, build-ios, test-python]
+    runs-on: ubuntu-latest
+    name: Create Release with Artifacts
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Download all artifacts
+        uses: actions/download-artifact@v3
+        with:
+          path: artifacts
+      
+      - name: Create Release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          release_name: Masterpiece Swarm v1.0.${{ github.run_number }}
+          body: |
+            ## Masterpiece Swarm Trading Bot - Release v1.0.${{ github.run_number }}
+            
+            Autonomous AI-powered micro-aggressive trading bot with real-time P&L tracking.
+            
+            ### Artifacts Included:
+            - 📱 **Android APK** - Install directly on Android devices
+            - 🍎 **iOS Build** - Deploy to iPhone using Xcode
+            - 💻 **Desktop Package** - Run on Windows/Mac/Linux
+            
+            ### Downloads:
+            All artifacts are available in the GitHub Actions build output.
+            
+            ### Setup Instructions:
+            See README.md and SETUP_GUIDE_iOS.md
+            
+            ---
+            Build Date: ${{ github.event.head_commit.timestamp }}
+            Commit: ${{ github.sha }}
+          draft: false
+          prerelease: false
