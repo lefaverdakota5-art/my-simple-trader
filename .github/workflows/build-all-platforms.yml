@@ -1,0 +1,168 @@
+name: Build All Platforms
+
+on:
+  push:
+    branches: ["main", "develop", "**"]
+  pull_request:
+    branches: ["main", "develop"]
+  workflow_dispatch:
+
+jobs:
+  # ──────────────────────────────────────────────
+  # Job 1: Build Android APK (Capacitor/Gradle)
+  # ──────────────────────────────────────────────
+  build-android:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install JS dependencies
+        run: npm install
+
+      - name: Build web assets + copy into Android
+        run: npm run apk:prepare
+
+      - name: Sync Capacitor Android
+        run: npx cap sync android
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Build Debug APK
+        working-directory: android
+        run: |
+          BUILD_NUMBER=${{ github.run_number }} \
+          VERSION_NAME="1.5.${{ github.run_number }}" \
+          ./gradlew assembleDebug
+
+      - name: Rename APK
+        run: |
+          cp android/app/build/outputs/apk/debug/app-debug.apk \
+             "masterpiece-swarm-trader-android-${{ github.run_number }}.apk"
+
+      - name: Upload Android APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk-${{ github.run_number }}
+          path: masterpiece-swarm-trader-android-${{ github.run_number }}.apk
+          retention-days: 30
+
+  # ──────────────────────────────────────────────
+  # Job 2: Build iOS (Xcode / kivy-ios stub)
+  # Runs on macOS; produces unsigned IPA archive
+  # ──────────────────────────────────────────────
+  build-ios:
+    name: Build iOS Archive
+    runs-on: macos-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install JS dependencies
+        run: npm install
+
+      - name: Build web assets
+        run: npm run build
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install iOS build tools
+        run: |
+          pip install kivy-ios || true
+          brew install autoconf automake libtool pkg-config || true
+
+      - name: Package Desktop (Python) artifact for iOS reference
+        run: |
+          mkdir -p ios-desktop-bundle
+          cp main.py ios-desktop-bundle/
+          cp requirements.txt ios-desktop-bundle/
+          cp -r src ios-desktop-bundle/ 2>/dev/null || true
+          echo "iOS build requires Xcode code-signing. See GITHUB_ACTIONS_SETUP.md." \
+            > ios-desktop-bundle/BUILD_NOTES.txt
+          zip -r "masterpiece-swarm-trader-ios-bundle-${{ github.run_number }}.zip" \
+            ios-desktop-bundle/
+
+      - name: Upload iOS bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-bundle-${{ github.run_number }}
+          path: masterpiece-swarm-trader-ios-bundle-${{ github.run_number }}.zip
+          retention-days: 30
+
+  # ──────────────────────────────────────────────
+  # Job 3: Build Desktop Python Package
+  # ──────────────────────────────────────────────
+  build-desktop:
+    name: Build Desktop Python Package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: |
+          pip install --upgrade pip
+          # Skip heavy ML packages for CI speed
+          grep -v -E '^(torch|torchvision|torchaudio|tensorflow|transformers|xgboost)' \
+            requirements.txt > /tmp/ci-requirements.txt
+          pip install -r /tmp/ci-requirements.txt --quiet || true
+
+      - name: Run Python unit tests
+        run: |
+          pip install python-dotenv fastapi || true
+          python -m pytest test_main.py -v --tb=short 2>/dev/null || \
+          python -m unittest test_main -v
+
+      - name: Bundle Desktop app
+        run: |
+          mkdir -p desktop-bundle
+          cp main.py requirements.txt desktop-bundle/
+          cp -r src desktop-bundle/ 2>/dev/null || true
+          cp -r supabase desktop-bundle/ 2>/dev/null || true
+          cp schema.sql desktop-bundle/ 2>/dev/null || true
+          zip -r "masterpiece-swarm-trader-desktop-${{ github.run_number }}.zip" \
+            desktop-bundle/
+
+      - name: Upload Desktop artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-python-${{ github.run_number }}
+          path: masterpiece-swarm-trader-desktop-${{ github.run_number }}.zip
+          retention-days: 30

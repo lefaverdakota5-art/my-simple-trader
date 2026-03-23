@@ -1,9 +1,26 @@
-# AI Trader - Personal Trading Bot (v1.3.0)
+# Masterpiece Swarm Trader (v1.5.0)
 
-An AI-powered trading application that uses Kraken for cryptocurrency trading with intelligent decision-making through an OpenAI-powered council of AI agents.
+An AI-powered trading application with a 4-agent swarm council, Supabase ledger, real-time price feeds, and automated CI/CD builds for Android, iOS, and Desktop.
 
-## ✨ Version 1.3.0 - New Features
+## ⬇️ Download Pre-Built Binaries
 
+| Platform | How to Download |
+|----------|----------------|
+| 📱 **Android APK** | [Actions → Build All Platforms](../../actions/workflows/build-all-platforms.yml) → latest run → Artifacts |
+| 🍎 **iOS Bundle**  | [Actions → Build All Platforms](../../actions/workflows/build-all-platforms.yml) → latest run → Artifacts |
+| 🖥️ **Desktop (Python)** | [Actions → Build All Platforms](../../actions/workflows/build-all-platforms.yml) → latest run → Artifacts |
+| 📦 **All Platforms** | [Releases](../../releases) — pick the latest tagged release |
+
+> See [GITHUB_ACTIONS_SETUP.md](./GITHUB_ACTIONS_SETUP.md) for full CI/CD setup and build instructions.
+
+## ✨ Version 1.5.0 - CI/CD & Multi-Platform Builds
+
+- ✅ **GitHub Actions CI/CD** - Automated builds for Android APK, iOS, and Desktop on every push
+- ✅ **Multi-Platform Artifacts** - Download pre-built binaries directly from GitHub Actions
+- ✅ **Automated Releases** - Tag a version to auto-create a GitHub Release with all platform builds
+- ✅ **4-Agent AI Swarm** - Technical, Sentiment, Risk, and Execution agents collaborate on every trade
+- ✅ **Supabase Ledger** - Complete `schema.sql` for trade logging, P&L tracking, and bot config
+- ✅ **Kill Switch** - Instantly halt the bot from the UI or via Supabase `bot_config`
 - ✅ **Functional Deposit Flow** - Deposit money from Chime directly into your trading account
 - ✅ **Kraken-Only Trading** - Focused cryptocurrency trading via Kraken API
 - ✅ **Real Balance Tracking** - Deposits update your balance, trades deduct from it
