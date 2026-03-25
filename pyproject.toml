@@ -11,7 +11,7 @@ requires-python = ">=3.11"
 license = { text = "MIT" }
 dependencies = [
   "fastapi",
-  "uvicorn[standard]",
+  "uvicorn",
   "python-multipart",
   "pykrakenapi",
   "krakenex",
