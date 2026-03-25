@@ -14,6 +14,9 @@ import CashOut from "./pages/CashOut";
 import Intents from "./pages/Intents";
 import IntentDetail from "./pages/IntentDetail";
 import Logs from "./pages/Logs";
+import TradeHistory from "./pages/TradeHistory";
+import LiveActivity from "./pages/LiveActivity";
+import BotMonitor from "./pages/BotMonitor";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -36,6 +39,9 @@ const App = () => (
           <Route path="/intents" element={<Intents />} />
           <Route path="/intents/:id" element={<IntentDetail />} />
           <Route path="/logs" element={<Logs />} />
+          <Route path="/trade-history" element={<TradeHistory />} />
+          <Route path="/live-activity" element={<LiveActivity />} />
+          <Route path="/bot-monitor" element={<BotMonitor />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>

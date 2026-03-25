@@ -21,7 +21,10 @@ import {
   RefreshCw,
   AlertTriangle,
   Clock,
-  FileText
+  FileText,
+  History,
+  BarChart2,
+  Radio
 } from "lucide-react";
 
 export default function Dashboard() {
@@ -262,13 +265,34 @@ export default function Dashboard() {
       </div>
 
       {/* Action Buttons */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
         <button
           onClick={() => navigate('/intents')}
           className="p-4 rounded-lg border-2 border-primary bg-primary/10 hover:bg-primary/20 font-semibold transition-all text-primary"
         >
           <Activity className="h-5 w-5 mx-auto mb-1" />
           Trade Intents
+        </button>
+        <button
+          onClick={() => navigate('/live-activity')}
+          className="p-4 rounded-lg border-2 border-blue-500 bg-blue-50 dark:bg-blue-950 text-blue-600 font-semibold transition-all hover:bg-blue-100 dark:hover:bg-blue-900"
+        >
+          <Radio className="h-5 w-5 mx-auto mb-1" />
+          Live Activity
+        </button>
+        <button
+          onClick={() => navigate('/trade-history')}
+          className="p-4 rounded-lg border-2 border-border bg-background hover:bg-muted font-semibold transition-all"
+        >
+          <History className="h-5 w-5 mx-auto mb-1" />
+          Trade History
+        </button>
+        <button
+          onClick={() => navigate('/bot-monitor')}
+          className="p-4 rounded-lg border-2 border-border bg-background hover:bg-muted font-semibold transition-all"
+        >
+          <BarChart2 className="h-5 w-5 mx-auto mb-1" />
+          Bot Monitor
         </button>
         <button
           onClick={() => navigate('/bot-settings')}
