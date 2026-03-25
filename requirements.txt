@@ -2,7 +2,7 @@
 fastapi
 uvicorn
 python-multipart
-alpaca-trade-api
+alpaca-py
 pykrakenapi
 krakenex
 xmltodict
