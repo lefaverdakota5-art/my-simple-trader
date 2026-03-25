@@ -32,6 +32,9 @@ jobs:
 
       - name: Build web assets + copy into Android
         run: npm run apk:prepare
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL || secrets.SUPABASE_URL }}
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY || secrets.SUPABASE_ANON_KEY }}
 
       - name: Sync Capacitor Android
         run: npx cap sync android
@@ -89,6 +92,9 @@ jobs:
 
       - name: Build web assets
         run: npm run build
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL || secrets.SUPABASE_URL }}
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY || secrets.SUPABASE_ANON_KEY }}
 
       - name: Setup Python
         uses: actions/setup-python@v5

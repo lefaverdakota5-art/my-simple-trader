@@ -26,6 +26,9 @@ jobs:
 
       - name: Build web + copy into Android
         run: npm run apk:prepare
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL || secrets.SUPABASE_URL }}
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY || secrets.SUPABASE_ANON_KEY }}
       
       - name: Ensure Capacitor Android is synced (generates cordova.variables.gradle)
         run: npx cap sync android
