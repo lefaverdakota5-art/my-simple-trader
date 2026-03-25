@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import os
 import sqlite3
@@ -36,11 +38,25 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 import krakenex
 from pykrakenapi import KrakenAPI
-from alpaca.trading.client import TradingClient
-from alpaca.trading.requests import MarketOrderRequest
-from alpaca.trading.enums import OrderSide, TimeInForce
-from alpaca.data.historical import StockHistoricalDataClient
-from alpaca.data.requests import StockLatestQuoteRequest, StockLatestBarRequest
+
+# alpaca-py is optional; if not installed the Alpaca trading path is disabled
+try:
+    from alpaca.trading.client import TradingClient
+    from alpaca.trading.requests import MarketOrderRequest
+    from alpaca.trading.enums import OrderSide, TimeInForce
+    from alpaca.data.historical import StockHistoricalDataClient
+    from alpaca.data.requests import StockLatestQuoteRequest, StockLatestBarRequest
+    _ALPACA_AVAILABLE = True
+except ImportError:
+    TradingClient = None  # type: ignore
+    MarketOrderRequest = None  # type: ignore
+    OrderSide = None  # type: ignore
+    TimeInForce = None  # type: ignore
+    StockHistoricalDataClient = None  # type: ignore
+    StockLatestQuoteRequest = None  # type: ignore
+    StockLatestBarRequest = None  # type: ignore
+    _ALPACA_AVAILABLE = False
+    logger.warning("alpaca-py package not installed, Alpaca trading will be unavailable")
 
 from src.ai_modules.ensemble_ai import EnsembleAI
 from src.ai_modules.news_sentiment import NewsSentiment
