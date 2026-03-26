@@ -1,0 +1,41 @@
+version: '3.9'
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.selfhost.api
+    container_name: my-simple-trader-api
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PORT: 8000
+      BOT_CORS_ORIGINS: http://localhost,http://localhost:80,http://localhost:8080
+      LOG_FILE: "true"
+    expose:
+      - "8000"
+    volumes:
+      - api_data:/app/data
+      - api_logs:/app/logs
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.selfhost.web
+      args:
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL}
+        VITE_SUPABASE_PUBLISHABLE_KEY: ${VITE_SUPABASE_PUBLISHABLE_KEY}
+    container_name: my-simple-trader-web
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "80:80"
+    volumes:
+      - web_logs:/var/log/nginx
+
+volumes:
+  api_data:
+  api_logs:
+  web_logs:
